@@ -1,0 +1,31 @@
+{
+    "workbench.editorAssociations": {
+        "*.ipynb": "jupyter-notebook"
+    },
+    "git.ignoreLegacyWarning": true,
+    "editor.wordWrapColumn": 120,
+    "notebook.cellToolbarLocation": {
+        "default": "right",
+        "jupyter-notebook": "left"
+    },
+    "python.formatting.provider": "black",
+    "python.languageServer": "Pylance",
+    "files.trimTrailingWhitespace": true,
+    "python.sortImports.path": "isort",
+    "editor.formatOnSave": true,
+    "python.formatting.blackArgs": [
+        "--line-length=120",
+    ],
+    "python.sortImports.args": [
+        "--profile=black",
+        "--project=marl",
+        "--thirdparty=reverb",
+    ],
+    "[python]": {
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": true
+        }
+    },
+    "python.autoComplete.extraPaths": [],
+    "python.analysis.extraPaths": []
+}

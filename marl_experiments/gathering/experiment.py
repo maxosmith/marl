@@ -1,0 +1,400 @@
+import dataclasses
+import functools
+from ast import Call
+from typing import Any, Callable, List, Mapping, Optional, Union
+
+import haiku as hk
+import jax
+import launchpad as lp
+import numpy as np
+import optax
+import reverb
+from absl import app, logging
+from marl_experiments.gathering import networks, render_arena
+
+from marl import _types, bots, games, individuals, services, utils, worlds
+from marl.rl.agents.impala import graphs
+from marl.rl.replay.reverb import adders as reverb_adders
+from marl.services import arenas, evaluation_policy
+from marl.services.arenas import training_arena
+from marl.utils import loggers, node_utils, signals, spec_utils, wrappers
+
+
+@dataclasses.dataclass
+class IMPALAConfig:
+    """Configuration options for IMPALA."""
+
+    result_dir = "/scratch/wellman_root/wellman1/mxsmith/tests/impala"
+
+    seed: int = 0
+    discount: float = 0.99
+    sequence_length: int = 10
+    sequence_period: Optional[int] = None
+    variable_update_period: int = 1000
+    variable_client_key: str = "network"
+    step_key: str = "update_steps"
+    frame_key: str = "update_frames"
+
+    # Topology.
+    num_training_arenas: int = 4
+
+    # Agent configuration.
+    timestep_encoder_ctor: Callable[..., hk.Module] = networks.TimestepEncoder
+    timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    memory_core_ctor: Callable[..., hk.Module] = networks.MemoryCore
+    memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    policy_head_ctor: Callable[..., hk.Module] = networks.PolicyHead
+    policy_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    value_head_ctor: Callable[..., hk.Module] = networks.ValueHead
+    value_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    # Optimizer configuration.
+    batch_size: int = 32
+    learning_rate: Union[float, optax.Schedule] = 2e-4
+    adam_momentum_decay: float = 0.0
+    adam_variance_decay: float = 0.99
+    adam_eps: float = 1e-8
+    adam_eps_root: float = 0.0
+    max_gradient_norm: float = 40.0
+
+    # Loss configuration.
+    baseline_cost: float = 0.5
+    entropy_cost: float = 0.01
+    max_abs_reward: float = np.inf
+
+    # Replay options.
+    replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
+    replay_max_size: int = 1_000_000
+    samples_per_insert: int = 4
+    min_size_to_sample: int = 100_000
+    max_times_sampled: int = 1
+    error_buffer: int = 100
+    num_prefetch_threads: Optional[int] = None
+    samples_per_insert: Optional[float] = float("inf")
+    max_queue_size: int = 100
+
+    # Evaluation.
+    render_frequency: int = 10_000
+
+    def __post_init__(self):
+        assert (
+            self.max_queue_size > self.batch_size + 1
+        ), """
+        max_queue_size must be strictly larger than the batch size:
+        - during the last step in an episode we might write 2 sequences to
+          Reverb at once (that's how SequenceAdder works)
+        - Reverb does insertion/sampling in multiple threads, so data is
+          added asynchronously at unpredictable times. Therefore we need
+          additional buffer size in order to avoid deadlocks."""
+
+
+def build_game():
+    game = games.Gathering(n_agents=2)
+    game = wrappers.TimeLimit(game, num_steps=100)
+    return game
+
+
+def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec):
+    timestep = spec_utils.zeros_from_spec(env_spec)
+
+    def _impala():
+        num_actions = env_spec.action.num_values
+        timestep_encoder = config.timestep_encoder_ctor(num_actions=num_actions, **config.timestep_encoder_kwargs)
+        memory_core = config.memory_core_ctor(**config.memory_core_kwargs)
+        policy_head = config.policy_head_ctor(num_actions=num_actions, **config.policy_head_kwargs)
+        value_head = config.value_head_ctor(**config.value_head_kwargs)
+
+        impala = graphs.IMPALA(
+            timestep_encoder=timestep_encoder,
+            memory_core=memory_core,
+            policy_head=policy_head,
+            value_head=value_head,
+        )
+
+        def init():
+            return impala(timestep, impala.initial_state(None))
+
+        return init, (impala.__call__, impala.loss, impala.initial_state, impala.state_spec)
+
+    hk_graphs = hk.multi_transform(_impala)
+    policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[0])
+    loss = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[1])
+    initial_state = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[2])
+    state_spec = hk.without_apply_rng(hk_graphs).apply[3](None)  # No parameters.
+    return policy, loss, initial_state, state_spec
+
+
+def build_reverb_node(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec, state_spec: worlds.TreeSpec):
+    def _build_reverb_node(
+        env_spec: worlds.EnvironmentSpec, sequence_length: int, table_name: str
+    ) -> List[reverb.Table]:
+        signature = signature = reverb_adders.SequenceAdder.signature(
+            env_spec,
+            state_spec,
+            sequence_length=sequence_length,
+        )
+        rate_limiter = reverb.rate_limiters.SampleToInsertRatio(
+            samples_per_insert=config.samples_per_insert,
+            min_size_to_sample=config.min_size_to_sample,
+            error_buffer=config.error_buffer,
+        )
+        replay_table = reverb.Table(
+            name=table_name,
+            sampler=reverb.selectors.Uniform(),
+            remover=reverb.selectors.Fifo(),
+            max_size=config.replay_max_size,
+            max_times_sampled=config.max_times_sampled,
+            rate_limiter=rate_limiter,
+            signature=signature,
+        )
+        return [replay_table]
+
+    build_reverb_node_fn = functools.partial(
+        _build_reverb_node,
+        env_spec=env_spec,
+        sequence_length=config.sequence_length,
+        table_name=config.replay_table_name,
+    )
+    return lp.ReverbNode(build_reverb_node_fn)
+
+
+@node_utils.build_courier_node
+def build_update_node(
+    config: IMPALAConfig,
+    random_key: jax.random.PRNGKey,
+    loss_graph: hk.Transformed,
+    reverb_handle: lp.CourierHandle,
+    counter_handle: lp.CourierHandle,
+    result_dir: utils.ResultDirectory,
+):
+    logger = loggers.LoggerManager(
+        loggers=[
+            loggers.TerminalLogger(time_frequency=5),
+            loggers.TensorboardLogger(result_dir.dir),
+        ],
+        time_frequency=5,  # Seconds.
+    )
+    local_counter = services.Counter(parent=counter_handle)
+
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(config.max_gradient_norm),
+        optax.adam(
+            config.learning_rate,
+            b1=config.adam_momentum_decay,
+            b2=config.adam_variance_decay,
+            eps=config.adam_eps,
+            eps_root=config.adam_eps_root,
+        ),
+    )
+
+    data_iterator = services.ReverbPrefetchClient(
+        reverb_client=reverb_handle,
+        table_name=config.replay_table_name,
+        batch_size=config.batch_size,
+    )
+    return services.LearnerUpdate(
+        loss_fn=loss_graph,
+        optimizer=optimizer,
+        data_iterator=data_iterator,
+        logger=logger,
+        counter=local_counter,
+        step_key=config.step_key,
+        frame_key=config.frame_key,
+        random_key=random_key,
+    )
+
+
+@node_utils.build_courier_node(disable_run=False)
+def build_training_arena_node(
+    config: IMPALAConfig,
+    random_key: jax.random.PRNGKey,
+    policy_graph: hk.Transformed,
+    initial_state_graph: hk.Transformed,
+    reverb_handle: lp.CourierHandle,
+    learner_update_handle: lp.CourierHandle,
+    game: worlds.Game,
+    players,
+    result_dir: utils.ResultDirectory,
+):
+    # NOTE: Currently LaunchPad does not support RPC methods receiving np.Arrays.
+    # Therefore, we cannot send TimeSteps over RPC, so instead each learner must
+    # be directly associated with a training arena.
+    #
+    # NOTE: That the last transition in the sequence is used for bootstrapping
+    # only and is ignored otherwise. So we need to make sure that sequences
+    # overlap on one transition, thus "-1" in the period length computation.
+    reverb_adder = reverb_adders.SequenceAdder(
+        client=reverb_handle,
+        priority_fns={config.replay_table_name: None},
+        period=config.sequence_period or (config.sequence_length - 1),
+        sequence_length=config.sequence_length,
+    )
+    # Variable client is responsible for syncing with the Updating node, but does not tell
+    # that node when it should update.
+    variable_source = services.VariableClient(
+        source=learner_update_handle,
+        key=config.variable_client_key,
+        update_period=config.variable_update_period,
+    )
+    policy = services.LearnerPolicy(
+        policy_fn=policy_graph,
+        initial_state_fn=initial_state_graph,
+        reverb_adder=reverb_adder,
+        variable_source=variable_source,
+        random_key=random_key,
+        backend="cpu",
+    )
+
+    players[0] = policy
+    logger = loggers.TensorboardLogger(result_dir.dir)
+    train_arena = arenas.TrainingArena(
+        game=game,
+        players=players,
+        logger=logger,
+    )
+    return train_arena
+
+
+@node_utils.build_courier_node
+def build_snapshot_node(
+    snapshot_template: services.Snapshot,
+    learner_update_handle: lp.CourierHandle,
+    result_dir: utils.ResultDirectory,
+):
+    return services.Snapshotter(
+        variable_source=learner_update_handle,
+        snapshot_templates={"impala": snapshot_template},
+        directory=result_dir.dir,
+        max_to_keep=2,
+    )
+
+
+@node_utils.build_courier_node
+def build_counter_node():
+    return services.Counter()
+
+
+@node_utils.build_courier_node
+def build_rendering_arena_node(
+    config: IMPALAConfig,
+    policy_fn: hk.Transformed,
+    initial_state_fn: hk.Transformed,
+    random_key: jax.random.PRNGKey,
+    learner_update_handle: lp.CourierHandle,
+    opponents,
+    counter_handle: lp.CourierHandle,
+    result_dir: utils.ResultDirectory,
+):
+    variable_source = services.VariableClient(
+        source=learner_update_handle,
+        key=config.variable_client_key,
+    )
+    evaluation_policy = services.EvaluationPolicy(
+        policy_fn=policy_fn,
+        initial_state_fn=initial_state_fn,
+        variable_source=variable_source,
+        random_key=random_key,
+    )
+
+    return render_arena.EvaluationArena(
+        agents={0: evaluation_policy},
+        bots=opponents,
+        scenarios=render_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
+        evaluation_frequency=config.render_frequency,
+        counter=counter_handle,
+        step_key=config.step_key,
+        result_dir=result_dir,
+    )
+
+
+def main(_):
+    config = IMPALAConfig()
+    result_dir = utils.ResultDirectory(config.result_dir, overwrite=True)
+
+    random_key = jax.random.PRNGKey(config.seed)
+    game = build_game()
+    env_spec = spec_utils.make_game_specs(game)[0]
+
+    opponents = {1: bots.RandomIntAction(num_actions=env_spec.action.num_values, env_spec=env_spec)}
+
+    program = lp.Program(name="experiment")
+    resources = {}
+
+    # TODO(maxsmith): Configurable networks and ensure that this is captured in the snapshot.
+    policy_graph, loss_graph, initial_state_graph, state_spec = build_computational_graphs(config, env_spec)
+    snapshot_template = services.Snapshot(
+        ctor=build_computational_graphs, ctor_kwargs=dict(config=config, env_spec=env_spec)
+    )
+
+    with program.group("counter"):
+        counter_handle = program.add_node(build_counter_node())
+        resources[program._current_group] = dict(cpu=1, ram=10)
+
+    with program.group("reverb"):
+        reverb_handle = program.add_node(build_reverb_node(config, env_spec, state_spec))
+
+    with program.group("learner_update"):
+        learner_update_handle = program.add_node(
+            build_update_node(
+                config,
+                random_key,
+                loss_graph,
+                reverb_handle,
+                counter_handle,
+                result_dir.make_subdir(program._current_group),
+            )
+        )
+        resources[program._current_group] = dict(cpu=1, ram=10)
+
+    with program.group("training_arena"):
+        resources[program._current_group] = dict(cpu=1, ram=10)  # Same for each node in group.
+
+        for node_i in range(config.num_training_arenas):
+            node_name = f"{program._current_group}_{node_i}"
+            program.add_node(
+                build_training_arena_node(
+                    config,
+                    random_key,
+                    policy_graph,
+                    initial_state_graph,
+                    reverb_handle,
+                    learner_update_handle,
+                    game,
+                    opponents,
+                    result_dir.make_subdir(node_name),
+                )
+            )
+
+    with program.group("render_arena"):
+        program.add_node(
+            build_rendering_arena_node(
+                config,
+                policy_graph,
+                initial_state_graph,
+                random_key,
+                learner_update_handle,
+                opponents,
+                counter_handle,
+                result_dir.make_subdir(program._current_group),
+            )
+        )
+        resources[program._current_group] = dict(cpu=1, ram=10)
+
+    with program.group("saver"):
+        program.add_node(
+            build_snapshot_node(
+                snapshot_template, learner_update_handle, result_dir.make_subdir(program._current_group)
+            )
+        )
+        resources[program._current_group] = dict(cpu=1, ram=10)
+
+    lp.launch(
+        program,
+        launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
+        serialize_py_nodes=False,
+        # local_resources=resources,
+    )
+
+
+if __name__ == "__main__":
+    app.run(main)
