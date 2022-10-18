@@ -105,18 +105,13 @@ class LearnerUpdate:
         for _ in iterator:
             self.step()
 
-    # def update(self) -> bool:
-    #     """Perform an update step of the learner's parameters."""
-    #     updated = False
-    #     while self._data_iterator.ready():
-    #         self.step()
-    #         updated = True
-    #     return updated
-
     def step(self):
         """Perform a single update step."""
         reverb_sample = next(self._data_iterator)
 
+        # TODO(maxsmith): The random key needs to be split, but only by-device.
+        # IMPALA doesn't use RNG during updating, so this isn't a bug right now.
+        # self._random_key, subkey = jax.random.split(self._random_key)
         self._state, metrics = self._update_step(
             params=self._state.params,
             rng=self._random_key,

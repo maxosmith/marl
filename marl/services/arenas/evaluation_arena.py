@@ -2,27 +2,26 @@
 import dataclasses
 import operator
 import time
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence, Union
 
 import numpy as np
 import tree
 from absl import logging
 
 from marl import _types, services, worlds
+from marl.services import counter as counter_lib
 from marl.services.arenas import base
 from marl.utils import dict_utils, loggers, signals, spec_utils, tree_utils
 
 
-@dataclasses.dataclass
-class EpisodeResult:
-    episode_length: int
+class EpisodeResult(NamedTuple):
+    episode_length: np.array
     episode_return: _types.Tree
 
     def to_logdata(self) -> loggers.LogData:
         """Converts an episode result into data for loggers."""
-        log_data = dict(self.__dict__)
+        log_data = dict(episode_length=self.episode_length)
 
-        del log_data["episode_return"]
         return_data = tree_utils.flatten_as_dict(self.episode_return)
         return_data = dict_utils.prefix_keys(return_data, "episode_return/")
         log_data.update(return_data)
@@ -42,17 +41,12 @@ class EvaluationScenario:
     bot_id_to_player_id: Optional[Mapping[_types.PlayerID, _types.PlayerID]] = None
 
     def __post_init__(self):
-        if self.agent_id_to_player_id and (not self.bot_id_to_player_id):
-            raise ValueError("Must specify both ID mappings if either is specified.")
-        if self.bot_id_to_player_id and (self.agent_id_to_player_id):
-            raise ValueError("Must specify both ID mappings if either is specified.")
-        if (not self.agent_id_to_player_id) and (not self.bot_id_to_player_id):
-            return
-
-        # If neither PlayerID mappings were specified, we assume that the PlayerID of the
+        # If PlayerID mappings were not specified, we assume that the PlayerID of the
         # agents/bots in their populations are unique and correct.
-        self.agent_id_to_player_id = lambda x: x
-        self.bot_id_to_player_id: lambda x: x
+        if not self.agent_id_to_player_id:
+            self.agent_id_to_player_id = lambda x: x
+        if not self.bot_id_to_player_id:
+            self.bot_id_to_player_id = lambda x: x
 
 
 class EvaluationArena(base.ArenaInterface):
@@ -62,7 +56,7 @@ class EvaluationArena(base.ArenaInterface):
         agents:
         bots:
         scenarios:
-        evaluation_frequncy: Frequency, in seconds, to run evaluation.
+        evaluation_frequncy:
         logger:
     """
 
@@ -72,7 +66,9 @@ class EvaluationArena(base.ArenaInterface):
         bots: Mapping[_types.PlayerID, _types.Individual],
         scenarios: Union[EvaluationScenario, Sequence[EvaluationScenario]],
         evaluation_frequency: int,
+        counter: counter_lib.Counter,
         logger: loggers.Logger,
+        step_key: str,
     ):
         self._agents = agents
         self._bots = bots
@@ -80,7 +76,10 @@ class EvaluationArena(base.ArenaInterface):
             scenarios = [scenarios]
         self._scenarios = scenarios
         self._evaluation_frequency = evaluation_frequency
+        self._counter = counter
         self._logger = logger
+        self._step_key = step_key
+        self._last_eval = -np.inf
 
     def run_episode(self, game: worlds.Game, players: Mapping[_types.PlayerID, _types.Individual]) -> EpisodeResult:
         """Run one episode."""
@@ -102,9 +101,9 @@ class EvaluationArena(base.ArenaInterface):
                 operator.iadd, episode_return, {id: ts.reward for id, ts in timesteps.items()}
             )
 
-        return EpisodeResult(episode_length=episode_length, episode_return=episode_return)
+        return EpisodeResult(episode_length=np.asarray(episode_length), episode_return=episode_return)
 
-    def run_evaluation(self):
+    def run_evaluation(self, step: int):
         logging.info("Running evaluation scenarios.")
 
         # Get the current state of all learning agents.
@@ -118,13 +117,14 @@ class EvaluationArena(base.ArenaInterface):
             game = scenario.game_ctor(**scenario.game_kwargs)
             players = {}
             for agent_id, agent in self._agents.items():
-                players[scenario.agent_id_to_player_id[agent_id]] = agent
+                players[scenario.agent_id_to_player_id(agent_id)] = agent
             for bot_id, bot in self._bots.items():
-                players[scenario.bot_id_to_player_id[bot_id]] = bot
+                players[scenario.bot_id_to_player_id(bot_id)] = bot
 
             results = [self.run_episode(game, players) for _ in range(scenario.num_episodes)]
-            results = tree.map_structure(np.mean, *results)
+            results = tree.map_structure(lambda *args: np.mean([args]), *results)
             results = results.to_logdata()
+            results[self._step_key] = step
             if scenario.name:
                 results = dict_utils.prefix_keys(results, scenario.name)
             self._logger.write(results)
@@ -134,10 +134,16 @@ class EvaluationArena(base.ArenaInterface):
     def run(self):
         with signals.runtime_terminator():
             while True:
-                self.run_evaluation()
+                # Check the current step.
+                counts = self._counter.get_counts()
+                step = counts.get(self._step_key, 0)
 
-                # Wait for a set period before re-evaluating.
-                for _ in range(self._evaluation_frequency):
+                if step >= (self._last_eval + self._evaluation_frequency):
+                    self.run_evaluation(step)
+                    self._last_eval = step
+
+                # Don't spam the counter.
+                for _ in range(10):
                     # Do not sleep for a long period of time to avoid LaunchPad program
                     # termination hangs (time.sleep is not interruptible).
                     time.sleep(1)

@@ -124,7 +124,6 @@ class EvaluationArena(base.ArenaInterface):
 
             game = scenario.game_ctor(**scenario.game_kwargs)
             players = {}
-
             for agent_id, agent in self._agents.items():
                 players[scenario.agent_id_to_player_id(agent_id)] = agent
             for bot_id, bot in self._bots.items():

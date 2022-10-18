@@ -1,6 +1,7 @@
 import dataclasses
 import functools
 from ast import Call
+from random import random
 from typing import Any, Callable, List, Mapping, Optional, Union
 
 import haiku as hk
@@ -104,24 +105,40 @@ def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.Environmen
         policy_head = config.policy_head_ctor(num_actions=num_actions, **config.policy_head_kwargs)
         value_head = config.value_head_ctor(**config.value_head_kwargs)
 
-        impala = graphs.IMPALA(
+        train_impala = graphs.IMPALA(
             timestep_encoder=timestep_encoder,
             memory_core=memory_core,
             policy_head=policy_head,
             value_head=value_head,
+            evaluation=False,
+        )
+
+        eval_impala = graphs.IMPALA(
+            timestep_encoder=timestep_encoder,
+            memory_core=memory_core,
+            policy_head=policy_head,
+            value_head=value_head,
+            evaluation=True,
         )
 
         def init():
-            return impala(timestep, impala.initial_state(None))
+            return train_impala(timestep, train_impala.initial_state(None))
 
-        return init, (impala.__call__, impala.loss, impala.initial_state, impala.state_spec)
+        return init, (
+            train_impala.__call__,
+            train_impala.loss,
+            train_impala.initial_state,
+            train_impala.state_spec,
+            eval_impala.__call__,
+        )
 
     hk_graphs = hk.multi_transform(_impala)
-    policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[0])
+    train_policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[0])
     loss = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[1])
     initial_state = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[2])
     state_spec = hk.without_apply_rng(hk_graphs).apply[3](None)  # No parameters.
-    return policy, loss, initial_state, state_spec
+    eval_policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[4])
+    return train_policy, loss, initial_state, state_spec, eval_policy
 
 
 def build_reverb_node(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec, state_spec: worlds.TreeSpec):
@@ -275,6 +292,40 @@ def build_counter_node():
 
 
 @node_utils.build_courier_node
+def build_evaluation_arena_node(
+    config: IMPALAConfig,
+    policy_fn: hk.Transformed,
+    initial_state_fn: hk.Transformed,
+    random_key: jax.random.PRNGKey,
+    learner_update_handle: lp.CourierHandle,
+    opponents,
+    counter_handle: lp.CourierHandle,
+    result_dir: utils.ResultDirectory,
+):
+    variable_source = services.VariableClient(
+        source=learner_update_handle,
+        key=config.variable_client_key,
+    )
+    evaluation_policy = services.EvaluationPolicy(
+        policy_fn=policy_fn,
+        initial_state_fn=initial_state_fn,
+        variable_source=variable_source,
+        random_key=random_key,
+    )
+    logger = loggers.TensorboardLogger(result_dir.dir)
+
+    return arenas.EvaluationArena(
+        agents={0: evaluation_policy},
+        bots=opponents,
+        scenarios=arenas.evaluation_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
+        evaluation_frequency=config.render_frequency,
+        counter=counter_handle,
+        logger=logger,
+        step_key=config.step_key,
+    )
+
+
+@node_utils.build_courier_node
 def build_rendering_arena_node(
     config: IMPALAConfig,
     policy_fn: hk.Transformed,
@@ -321,7 +372,8 @@ def main(_):
     resources = {}
 
     # TODO(maxsmith): Configurable networks and ensure that this is captured in the snapshot.
-    policy_graph, loss_graph, initial_state_graph, state_spec = build_computational_graphs(config, env_spec)
+    graphs = build_computational_graphs(config, env_spec)
+    train_policy_graph, loss_graph, initial_state_graph, state_spec, eval_policy_graph = graphs
     snapshot_template = services.Snapshot(
         ctor=build_computational_graphs, ctor_kwargs=dict(config=config, env_spec=env_spec)
     )
@@ -334,10 +386,11 @@ def main(_):
         reverb_handle = program.add_node(build_reverb_node(config, env_spec, state_spec))
 
     with program.group("learner_update"):
+        random_key, subkey = jax.random.split(random_key)
         learner_update_handle = program.add_node(
             build_update_node(
                 config,
-                random_key,
+                subkey,
                 loss_graph,
                 reverb_handle,
                 counter_handle,
@@ -351,11 +404,13 @@ def main(_):
 
         for node_i in range(config.num_training_arenas):
             node_name = f"{program._current_group}_{node_i}"
+            random_key, subkey = jax.random.split(random_key)
+
             program.add_node(
                 build_training_arena_node(
                     config,
-                    random_key,
-                    policy_graph,
+                    subkey,
+                    train_policy_graph,
                     initial_state_graph,
                     reverb_handle,
                     learner_update_handle,
@@ -365,13 +420,16 @@ def main(_):
                 )
             )
 
-    with program.group("render_arena"):
+    with program.group("evaluation_arena"):
+        resources[program._current_group] = dict(cpu=1, ram=10)
+        random_key, subkey = jax.random.split(random_key)
+
         program.add_node(
-            build_rendering_arena_node(
+            build_evaluation_arena_node(
                 config,
-                policy_graph,
+                train_policy_graph,
                 initial_state_graph,
-                random_key,
+                subkey,
                 learner_update_handle,
                 opponents,
                 counter_handle,
@@ -379,6 +437,41 @@ def main(_):
             )
         )
         resources[program._current_group] = dict(cpu=1, ram=10)
+
+    with program.group("render_arena"):
+        resources[program._current_group] = dict(cpu=1, ram=10)  # Same for each node in group.
+
+        # Training rendering.
+        train_name = f"{program._current_group}_train"
+        random_key, subkey = jax.random.split(random_key)
+        program.add_node(
+            build_rendering_arena_node(
+                config,
+                train_policy_graph,
+                initial_state_graph,
+                subkey,
+                learner_update_handle,
+                opponents,
+                counter_handle,
+                result_dir.make_subdir(train_name),
+            )
+        )
+
+        # Evaluation rendering.
+        eval_name = f"{program._current_group}_eval"
+        random_key, subkey = jax.random.split(random_key)
+        program.add_node(
+            build_rendering_arena_node(
+                config,
+                eval_policy_graph,
+                initial_state_graph,
+                subkey,
+                learner_update_handle,
+                opponents,
+                counter_handle,
+                result_dir.make_subdir(eval_name),
+            )
+        )
 
     with program.group("saver"):
         program.add_node(

@@ -42,12 +42,14 @@ class EvaluationPolicy:
     def step(self, timestep: worlds.TimeStep, state: Optional[_types.Tree] = None):
         if timestep.first():
             state = self.episode_reset(timestep)
-        action, new_state = self._policy_fn(self._variable_source.params, self._random_key, timestep, state)
+        self._random_key, subkey = jax.random.split(self._random_key)
+        action, new_state = self._policy_fn(self._variable_source.params, subkey, timestep, state)
         action = tree_utils.to_numpy(action)
         return action, new_state
 
     def episode_reset(self, timestep: worlds.TimeStep):
-        state = self._initial_state_fn(None, self._random_key, batch_size=None)
+        self._random_key, subkey = jax.random.split(self._random_key)
+        state = self._initial_state_fn(None, subkey, batch_size=None)
         if not timestep.first():
             raise ValueError("Reset must be called after the first timestep.")
         return state

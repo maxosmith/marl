@@ -28,6 +28,7 @@ class IMPALA(hk.RNNCore):
         memory_core: hk.Module,
         policy_head: hk.Module,
         value_head: hk.Module,
+        evaluation: bool,
         # Hyperparameters.
         discount: float = 0.99,
         max_abs_reward: float = np.inf,
@@ -38,10 +39,11 @@ class IMPALA(hk.RNNCore):
         """Initialize an instance of the IMPALA algorithm's computational graphs.
 
         Args:
-            discount: The standard geometric discount rate to apply.
-            max_abs_reward: Optional symmetric reward clipping to apply.
-            baseline_cost: Weighting of the critic loss relative to the policy loss.
-            entropy_cost: Weighting of the entropy regulariser relative to policy loss.
+            timestep_encoder: Module that learns an embedding for a timestep.
+            memory_core: Module responsible for maintaining state/memory.
+            policy_head: Module that predicts per-action logits.
+            value_head: Module that predicts state values.
+            evaluation: Whether action selection should occur with exploration (True) or without (False).
         """
         super().__init__(name=name)
         self._discount = discount
@@ -53,6 +55,7 @@ class IMPALA(hk.RNNCore):
         self._memory_core = memory_core
         self._policy_head = policy_head
         self._value_head = value_head
+        self._evaluation = evaluation
 
         if not hasattr(self._policy_head, "num_actions"):
             raise ValueError("Policy head must have attribute `num_actions`.")
@@ -62,7 +65,10 @@ class IMPALA(hk.RNNCore):
         embeddings, new_recurrent_state = self._memory_core(embeddings, state.recurrent_state)
         logits = self._policy_head(embeddings)
         _ = self._value_head(embeddings)  # Calculate values to build associated parameters.
-        action = jnp.argmax(logits, axis=-1)
+        if self._evaluation:
+            action = jnp.argmax(logits, axis=-1)
+        else:
+            action = jax.random.categorical(hk.next_rng_key(), logits, axis=-1)
         return action, IMPALAState(recurrent_state=new_recurrent_state, logits=logits, prev_action=action)
 
     def initial_state(self, batch_size: Optional[int]):

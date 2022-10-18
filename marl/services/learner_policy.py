@@ -46,7 +46,8 @@ class LearnerPolicy:
         if timestep.first():
             state = self.episode_reset(timestep)
 
-        action, new_state = self._policy_fn(self._variable_source.params, self._random_key, timestep, state)
+        self._random_key, subkey = jax.random.split(self._random_key)
+        action, new_state = self._policy_fn(self._variable_source.params, subkey, timestep, state)
         action = tree_utils.to_numpy(action)
 
         if not timestep.first() and self._reverb_adder:
@@ -59,7 +60,8 @@ class LearnerPolicy:
         return action, new_state
 
     def episode_reset(self, timestep: worlds.TimeStep):
-        state = self._initial_state_fn(None, self._random_key, batch_size=None)
+        self._random_key, subkey = jax.random.split(self._random_key)
+        state = self._initial_state_fn(None, subkey, batch_size=None)
 
         # Start a new episode in the replay buffer.
         if not timestep.first():

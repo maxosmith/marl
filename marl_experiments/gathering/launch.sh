@@ -5,7 +5,7 @@
 #SBATCH --mail-user=max.olan.smith@gmail.com
 #SBATCH --mail-type=ALL
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=10
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem-per-cpu=10g
 #SBATCH --time=1-00:00
