@@ -40,7 +40,7 @@ class EpisodeResult:
 
         del log_data["episode_return"]
         return_data = tree_utils.flatten_as_dict(self.episode_return)
-        return_data = dict_utils.prefix_keys(return_data, "episode_return/")
+        return_data = dict_utils.prefix_keys(return_data, "train_return_per_episode/")
         log_data.update(return_data)
 
         return log_data

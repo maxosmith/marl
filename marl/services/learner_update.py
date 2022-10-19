@@ -123,7 +123,6 @@ class LearnerUpdate:
         # NOTE: This measure will be a noisy estimate for the purposes
         #  of the logs as it does not pmean over all devices.
         metrics = distributed_utils.get_from_first_device(metrics)
-
         if self._counter:
             counts = self._counter.increment(
                 **{

@@ -5,11 +5,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from marl import _types, worlds
+from marl import _types, nets, worlds
 from marl.rl.agents.impala.graphs import IMPALAState
 
 
-class TimestepEncoder(hk.Module):
+class CNNTimestepEncoder(hk.Module):
     def __init__(self, num_actions: int, name: Optional[str] = "timestep_encoder"):
         super().__init__(name=name)
         self.num_actions = num_actions
@@ -41,6 +41,23 @@ class TimestepEncoder(hk.Module):
         return self._net(h)
 
 
+class MLPTimestepEncoder(hk.Module):
+    def __init__(self, num_actions: int, name: Optional[str] = "timestep_encoder"):
+        super().__init__(name=name)
+        self.num_actions = num_actions
+        self._observation_net = hk.nets.MLP([30, 20])
+        self._net = hk.nets.MLP([20, 20])
+
+    def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Tree:
+        observation = timestep.observation.astype(float)
+        # Flatten assumes there is a leading batch dimension: [B, H, W, C].
+        observation = jnp.ravel(observation) if len(observation.shape) == 3 else hk.Flatten()(observation)
+        h = self._observation_net(observation)
+        action = jax.nn.one_hot(state.prev_action, self.num_actions)
+        h = jnp.concatenate([h, action], axis=-1)
+        return self._net(h)
+
+
 class MemoryCore(hk.Module):
     def __init__(self, name: Optional[str] = "memory_core"):
         super().__init__(name=name)
@@ -54,6 +71,26 @@ class MemoryCore(hk.Module):
         return self._core.initial_state(batch_size)
 
     def unroll(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, hk.LSTMState]:
+        """This should be for additional time dimension over call"""
+        outputs, new_state = hk.static_unroll(
+            core=self._core, input_sequence=inputs, initial_state=state, time_major=False
+        )
+        return outputs, new_state
+
+
+class MemoryLessCore(hk.Module):
+    def __init__(self, name: Optional[str] = "memoryless_core"):
+        super().__init__(name=name)
+        self._core = nets.MLPCore([20])
+
+    def __call__(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, nets.MLPCoreState]:
+        outputs, new_state = self._core(inputs, state)
+        return outputs, new_state
+
+    def initial_state(self, batch_size: Optional[int]) -> nets.MLPCoreState:
+        return self._core.initial_state(batch_size)
+
+    def unroll(self, inputs: _types.Tree, state: nets.MLPCoreState) -> Tuple[_types.Tree, nets.MLPCoreState]:
         """This should be for additional time dimension over call"""
         outputs, new_state = hk.static_unroll(
             core=self._core, input_sequence=inputs, initial_state=state, time_major=False

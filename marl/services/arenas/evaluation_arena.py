@@ -23,7 +23,7 @@ class EpisodeResult(NamedTuple):
         log_data = dict(episode_length=self.episode_length)
 
         return_data = tree_utils.flatten_as_dict(self.episode_return)
-        return_data = dict_utils.prefix_keys(return_data, "episode_return/")
+        return_data = dict_utils.prefix_keys(return_data, "eval_return/")
         log_data.update(return_data)
 
         return log_data

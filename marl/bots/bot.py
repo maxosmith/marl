@@ -11,3 +11,6 @@ class Bot(individuals.Bot):
 
     def step(self, timestep: worlds.TimeStep, state: _types.State) -> Tuple[_types.Action, _types.State]:
         return self._policy.step(timestep, state)
+
+    def episode_reset(self, timestep: worlds.TimeStep):
+        return None

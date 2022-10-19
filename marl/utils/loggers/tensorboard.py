@@ -14,7 +14,7 @@ class TensorboardLogger(base.Logger):
     """Logger that writes data as Tensorboard summaries (event files)."""
 
     def __init__(
-        self, log_dir: str, steps_key: Optional[str] = None, key_format_fn: Optional[Callable[[str], str]] = None
+        self, log_dir: str, step_key: Optional[str] = None, key_format_fn: Optional[Callable[[str], str]] = None
     ):
         """Initializes a TensorboardLogger.
 
@@ -25,7 +25,7 @@ class TensorboardLogger(base.Logger):
             key_format_fn: preprocess data keys before writing to the log.
         """
         self._summary_writer = tf.summary.create_file_writer(log_dir)
-        self._step_key = steps_key
+        self._step_key = step_key
         self._key_format_fn = key_format_fn
         self._num_calls = 0
 

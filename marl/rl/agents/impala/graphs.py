@@ -104,7 +104,7 @@ class IMPALA(hk.RNNCore):
         """
 
         def _impala_loss(logits, behaviour_logits, actions, values_tm1, values_t, rewards):
-            """IMPALA loss applied to non-sequential transition."""
+            """IMPALA loss applied to sequential transitions."""
             # Compute importance sampling weights: current policy / behavior policy.
             rhos = rlax.categorical_importance_sampling_ratios(logits, behaviour_logits, actions)
 
@@ -116,7 +116,7 @@ class IMPALA(hk.RNNCore):
                 discount_t=jnp.full_like(rewards, self._discount),
                 rho_tm1=rhos,
             )
-            critic_loss = jnp.square(vtrace_returns.errors)
+            critic_loss = jnp.mean(jnp.square(vtrace_returns.errors))
 
             # Policy gradient loss.
             policy_gradient_loss = rlax.policy_gradient_loss(
@@ -127,21 +127,19 @@ class IMPALA(hk.RNNCore):
             )
 
             # Entropy regulariser.
-            entropy_loss = rlax.entropy_loss(logits, jnp.ones_like(rewards))
+            entropy_loss = rlax.entropy_loss(logits, w_t=jnp.ones_like(rewards))
 
             # Combine weighted sum of actor & critic losses, averaged over the sequence.
             mean_loss = jnp.mean(
                 policy_gradient_loss + self._baseline_cost * critic_loss + self._entropy_cost * entropy_loss
             )
-
             metrics = {
                 "loss": mean_loss,
-                "policy_loss": jnp.mean(policy_gradient_loss),
-                "critic_loss": jnp.mean(self._baseline_cost * critic_loss),
-                "scaled_critic_loss": jnp.mean(critic_loss),
-                "entropy_loss": jnp.mean(entropy_loss),
-                "scaled_entropy_loss": jnp.mean(self._entropy_cost * entropy_loss),
-                "entropy": jnp.mean(entropy_loss),
+                "policy_loss": policy_gradient_loss,
+                "critic_loss": self._baseline_cost * critic_loss,
+                "scaled_critic_loss": critic_loss,
+                "entropy_loss": entropy_loss,
+                "scaled_entropy_loss": self._entropy_cost * entropy_loss,
             }
             return mean_loss, metrics
 
@@ -163,8 +161,7 @@ class IMPALA(hk.RNNCore):
         (logits, values), _ = self.unroll(data, state_and_extras)
 
         # Apply loss function over T.
-        loss_fn = jax.vmap(_impala_loss, in_axes=1)
-        mean_loss, metrics = loss_fn(
+        mean_loss, metrics = jax.vmap(_impala_loss, in_axes=0)(  # Apply loss batch-wise.
             logits=logits[:, :-1],
             behaviour_logits=behaviour_logits[:, :-1],
             actions=actions[:, :-1],

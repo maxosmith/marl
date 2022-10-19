@@ -14,6 +14,7 @@ from absl import app, logging
 from marl_experiments.gathering import networks, render_arena
 
 from marl import _types, bots, games, individuals, services, utils, worlds
+from marl.rl.agents import impala
 from marl.rl.agents.impala import graphs
 from marl.rl.replay.reverb import adders as reverb_adders
 from marl.services import arenas, evaluation_policy
@@ -29,7 +30,7 @@ class IMPALAConfig:
 
     seed: int = 0
     discount: float = 0.99
-    sequence_length: int = 10
+    sequence_length: int = 20
     sequence_period: Optional[int] = None
     variable_update_period: int = 1000
     variable_client_key: str = "network"
@@ -40,7 +41,7 @@ class IMPALAConfig:
     num_training_arenas: int = 4
 
     # Agent configuration.
-    timestep_encoder_ctor: Callable[..., hk.Module] = networks.TimestepEncoder
+    timestep_encoder_ctor: Callable[..., hk.Module] = networks.MLPTimestepEncoder
     timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     memory_core_ctor: Callable[..., hk.Module] = networks.MemoryCore
     memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
@@ -51,7 +52,7 @@ class IMPALAConfig:
 
     # Optimizer configuration.
     batch_size: int = 32
-    learning_rate: Union[float, optax.Schedule] = 2e-4
+    learning_rate: Union[float, optax.Schedule] = 6e-4
     adam_momentum_decay: float = 0.0
     adam_variance_decay: float = 0.99
     adam_eps: float = 1e-8
@@ -67,7 +68,7 @@ class IMPALAConfig:
     replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
     replay_max_size: int = 1_000_000
     samples_per_insert: int = 4
-    min_size_to_sample: int = 100_000
+    min_size_to_sample: int = 200_000
     max_times_sampled: int = 1
     error_buffer: int = 100
     num_prefetch_threads: Optional[int] = None
@@ -75,7 +76,7 @@ class IMPALAConfig:
     max_queue_size: int = 100
 
     # Evaluation.
-    render_frequency: int = 10_000
+    render_frequency: int = 100
 
     def __post_init__(self):
         assert (
@@ -90,7 +91,7 @@ class IMPALAConfig:
 
 
 def build_game():
-    game = games.Gathering(n_agents=2)
+    game = games.Gathering(n_agents=2, map_name="default_small")
     game = wrappers.TimeLimit(game, num_steps=100)
     return game
 
@@ -98,28 +99,28 @@ def build_game():
 def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec):
     timestep = spec_utils.zeros_from_spec(env_spec)
 
-    def _impala():
+    def _impala_graphs():
         num_actions = env_spec.action.num_values
         timestep_encoder = config.timestep_encoder_ctor(num_actions=num_actions, **config.timestep_encoder_kwargs)
         memory_core = config.memory_core_ctor(**config.memory_core_kwargs)
         policy_head = config.policy_head_ctor(num_actions=num_actions, **config.policy_head_kwargs)
         value_head = config.value_head_ctor(**config.value_head_kwargs)
 
-        train_impala = graphs.IMPALA(
+        impala_kwargs = dict(
+            # Sub-modules.
             timestep_encoder=timestep_encoder,
             memory_core=memory_core,
             policy_head=policy_head,
             value_head=value_head,
-            evaluation=False,
+            # Hyperparameters.
+            discount=config.discount,
+            max_abs_reward=config.max_abs_reward,
+            baseline_cost=config.baseline_cost,
+            entropy_cost=config.entropy_cost,
         )
 
-        eval_impala = graphs.IMPALA(
-            timestep_encoder=timestep_encoder,
-            memory_core=memory_core,
-            policy_head=policy_head,
-            value_head=value_head,
-            evaluation=True,
-        )
+        train_impala = graphs.IMPALA(evaluation=False, **impala_kwargs)
+        eval_impala = graphs.IMPALA(evaluation=True, **impala_kwargs)
 
         def init():
             return train_impala(timestep, train_impala.initial_state(None))
@@ -132,7 +133,7 @@ def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.Environmen
             eval_impala.__call__,
         )
 
-    hk_graphs = hk.multi_transform(_impala)
+    hk_graphs = hk.multi_transform(_impala_graphs)
     train_policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[0])
     loss = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[1])
     initial_state = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[2])
@@ -312,7 +313,7 @@ def build_evaluation_arena_node(
         variable_source=variable_source,
         random_key=random_key,
     )
-    logger = loggers.TensorboardLogger(result_dir.dir)
+    logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
 
     return arenas.EvaluationArena(
         agents={0: evaluation_policy},
@@ -366,7 +367,8 @@ def main(_):
     game = build_game()
     env_spec = spec_utils.make_game_specs(game)[0]
 
-    opponents = {1: bots.RandomIntAction(num_actions=env_spec.action.num_values, env_spec=env_spec)}
+    # opponents = {1: bots.RandomIntAction(num_actions=env_spec.action.num_values, env_spec=env_spec)}
+    opponents = {1: bots.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec)}
 
     program = lp.Program(name="experiment")
     resources = {}
@@ -483,6 +485,7 @@ def main(_):
 
     lp.launch(
         program,
+        # launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING,
         launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
         serialize_py_nodes=False,
         # local_resources=resources,

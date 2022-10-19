@@ -1,7 +1,6 @@
 """Tree, arbitrarily nested structures, utility functions."""
 import operator
-from multiprocessing.sharedctypes import Value
-from typing import Any, List, Mapping, Sequence
+from typing import Any, List, Mapping, Optional, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -209,3 +208,9 @@ def flatten_as_dict(x: _types.Tree, delimiter: str = "/") -> Mapping[str, Any]:
         return tmp
 
     return _flatten(x, "")
+
+
+def add_batch(struct: _types.Tree, batch_size: Optional[int]):
+    """Adds a batch dimension at axis 0 to all leaves."""
+    broadcast = lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape)
+    return jax.tree_util.tree_map(broadcast, struct)
