@@ -11,7 +11,8 @@ import numpy as np
 import optax
 import reverb
 from absl import app, logging
-from marl_experiments.gathering import networks, render_arena
+from marl_experiments.gathering import networks
+from marl_experiments.gathering.services import render_arena
 
 from marl import _types, bots, games, individuals, services, utils, worlds
 from marl.rl.agents import impala
@@ -26,7 +27,7 @@ from marl.utils import loggers, node_utils, signals, spec_utils, wrappers
 class IMPALAConfig:
     """Configuration options for IMPALA."""
 
-    result_dir = "/scratch/wellman_root/wellman1/mxsmith/tests/impala"
+    result_dir: str = "/scratch/wellman_root/wellman1/mxsmith/tests/impala"
 
     seed: int = 0
     discount: float = 0.99
@@ -42,6 +43,7 @@ class IMPALAConfig:
 
     # Agent configuration.
     timestep_encoder_ctor: Callable[..., hk.Module] = networks.MLPTimestepEncoder
+    # timestep_encoder_ctor: Callable[..., hk.Module] = networks.CNNTimestepEncoder
     timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     memory_core_ctor: Callable[..., hk.Module] = networks.MemoryCore
     memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
@@ -91,7 +93,7 @@ class IMPALAConfig:
 
 
 def build_game():
-    game = games.Gathering(n_agents=2, map_name="default_small")
+    game = games.Gathering(n_agents=2, map_name="default_small", global_observation=True)
     game = wrappers.TimeLimit(game, num_steps=100)
     return game
 
@@ -485,8 +487,8 @@ def main(_):
 
     lp.launch(
         program,
-        # launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING,
-        launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
+        launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING,
+        # launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
         serialize_py_nodes=False,
         # local_resources=resources,
     )

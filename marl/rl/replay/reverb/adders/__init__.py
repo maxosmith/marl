@@ -2,7 +2,6 @@
 # pylint: disable=unused-import
 
 from marl.rl.replay.reverb.adders.base import Adder
-from marl.rl.replay.reverb.adders.n_step_transition_adder import NStepTransitionAdder
 from marl.rl.replay.reverb.adders.reverb_adder import (
     DEFAULT_PRIORITY_TABLE,
     PriorityFn,

@@ -2,10 +2,22 @@
 
 from typing import Dict, Sequence
 
+import jax.numpy as jnp
+import numpy as np
 import tree
+
 from marl import _types
 from marl.rl.replay.reverb.adders import reverb_adder
 from marl.utils import array_utils, tree_utils
+
+
+def padding_mask(step: reverb_adder.Step) -> _types.Array:
+    """Construct a binary mask with 0s for padded steps."""
+    # This puts 1s on the last step and all padding.
+    mask = jnp.cumsum(step.end_of_episode, axis=-1)
+    # Do not mask the last timestep.
+    mask = mask - step.end_of_episode
+    return jnp.logical_not(mask)
 
 
 def final_step_like(step: reverb_adder.Step, next_observation: _types.Tree) -> reverb_adder.Step:

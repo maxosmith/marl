@@ -68,9 +68,9 @@ class Gathering(worlds.Game):
         self.height = self.initial_food.shape[1]
 
         if self.global_observation:
-            self.state_size = self.walls.shape[0] * self.walls.shape[1] * 4
+            self.state_size = self.walls.shape[0] * self.walls.shape[1] * 5
         else:
-            self.state_size = self.viewbox_width * self.viewbox_depth * 4
+            self.state_size = self.viewbox_width * self.viewbox_depth * 5
 
         self.reset()
         self.done = False
@@ -123,9 +123,9 @@ class Gathering(worlds.Game):
     def observation_specs(self) -> worlds.PlayerIDToSpec:
         """Returns the observation spec."""
         if self.global_observation:
-            shape = [self.walls.shape[0], self.walls.shape[1], 4]
+            shape = [self.walls.shape[0], self.walls.shape[1], 5]
         else:
-            shape = [self.viewbox_width, self.viewbox_depth, 4]
+            shape = [self.viewbox_width, self.viewbox_depth, 5]
         spec = worlds.ArraySpec(dtype=np.int32, shape=shape, name="state")
         return {i: spec for i in range(self.n_agents)}
 
@@ -300,7 +300,10 @@ class Gathering(worlds.Game):
                     else observation.transpose(1, 0, 2)
                 )
 
-        # return states.reshape((self.n_agents, self.state_size))
+        # Add a final class that represents the cell being unoccupied.
+        empty_tiles = np.logical_not(np.sum(states, axis=-1)).astype(states.dtype)
+        empty_tiles = np.expand_dims(empty_tiles, axis=-1)
+        states = np.concatenate([states, empty_tiles], axis=-1)
         return states
 
     def _reset(self):

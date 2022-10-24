@@ -16,9 +16,9 @@ class CNNTimestepEncoder(hk.Module):
         self._observation_net = hk.Sequential(
             [
                 # Input: [h, w, 4].
-                hk.ConvND(num_spatial_dims=2, output_channels=2, kernel_shape=2, stride=1),
+                hk.ConvND(num_spatial_dims=2, output_channels=4, kernel_shape=5, stride=1),
                 jax.nn.relu,
-                hk.ConvND(num_spatial_dims=2, output_channels=1, kernel_shape=2, stride=1),
+                hk.ConvND(num_spatial_dims=2, output_channels=2, kernel_shape=5, stride=1),
                 jax.nn.relu,
                 hk.Flatten(),
             ]
@@ -45,8 +45,8 @@ class MLPTimestepEncoder(hk.Module):
     def __init__(self, num_actions: int, name: Optional[str] = "timestep_encoder"):
         super().__init__(name=name)
         self.num_actions = num_actions
-        self._observation_net = hk.nets.MLP([30, 20])
-        self._net = hk.nets.MLP([20, 20])
+        self._observation_net = hk.nets.MLP([1024, 512, 256])
+        self._net = hk.nets.MLP([256, 256, 128])
 
     def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Tree:
         observation = timestep.observation.astype(float)
@@ -61,7 +61,7 @@ class MLPTimestepEncoder(hk.Module):
 class MemoryCore(hk.Module):
     def __init__(self, name: Optional[str] = "memory_core"):
         super().__init__(name=name)
-        self._core = hk.LSTM(20)
+        self._core = hk.LSTM(256)
 
     def __call__(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, hk.LSTMState]:
         outputs, new_state = self._core(inputs, state)
@@ -81,7 +81,7 @@ class MemoryCore(hk.Module):
 class MemoryLessCore(hk.Module):
     def __init__(self, name: Optional[str] = "memoryless_core"):
         super().__init__(name=name)
-        self._core = nets.MLPCore([20])
+        self._core = nets.MLPCore([256])
 
     def __call__(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, nets.MLPCoreState]:
         outputs, new_state = self._core(inputs, state)
@@ -117,3 +117,66 @@ class ValueHead(hk.Module):
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         value = jnp.squeeze(self._value_head(inputs), axis=-1)  # [B]
         return value
+
+
+class WorldStateConvPredictionHead(hk.Module):
+    def __init__(self, state_shape, name: Optional[str] = "world_state_prediction_head"):
+        super().__init__(name=name)
+
+    def __call__(self, x: _types.Tree) -> _types.Tree:
+        x = hk.Linear(13 * 11 * 2)(x)
+        x = jax.nn.relu(x)
+        x = jnp.reshape(x, x.shape[:-1] + (13, 11, 2))
+        x = hk.ConvNDTranspose(
+            num_spatial_dims=2,
+            output_channels=2,
+            kernel_shape=5,
+            stride=1,
+        )(x)
+        x = jax.nn.relu(x)
+        x = hk.ConvNDTranspose(
+            num_spatial_dims=2,
+            output_channels=4,
+            kernel_shape=5,
+            stride=1,
+        )(x)
+        return x  # (..., 21, 19, 4).
+
+
+class WorldStateLinearEncoder(hk.Module):
+    """World model input encoder for global-state with joint-actions."""
+
+    def __init__(self, state_shape: Tuple[int], num_actions: int, name: Optional[str] = "input_encoder"):
+        super().__init__(name=name)
+        self._state_shape = state_shape
+        self._num_actions = num_actions
+        final_output_shape = np.prod(self._state_shape)
+        self._net = hk.nets.MLP([final_output_shape, int(final_output_shape / 2), int(final_output_shape / 2)])
+
+    def __call__(self, world_state: _types.Tree, actions: _types.PlayerIDToAction) -> _types.Tree:
+        world_state = hk.Flatten(preserve_dims=-3)(world_state)
+        actions = hk.Flatten(preserve_dims=-2)(jax.nn.one_hot(actions, self._num_actions))
+        inputs = jnp.concatenate([world_state, actions], axis=-1)
+        return self._net(inputs)
+
+
+class WorldStateLinearPredictionHead(hk.Module):
+    def __init__(self, state_shape: Tuple[int], name: Optional[str] = "world_state_prediction_head"):
+        super().__init__(name=name)
+        self._state_shape = state_shape
+        final_output_shape = np.prod(self._state_shape)
+        self._net = hk.nets.MLP([int(final_output_shape / 2), int(final_output_shape / 2), final_output_shape])
+
+    def __call__(self, x: _types.Tree) -> _types.Tree:
+        x = self._net(x)
+        x = jnp.reshape(x, x.shape[:-1] + self._state_shape)
+        return x
+
+
+class RewardPredictionHead(hk.Module):
+    def __init__(self, name: Optional[str] = "reward_prediction_head"):
+        super().__init__(name=name)
+        self._net = hk.nets.MLP([256, 128, 32, 1])
+
+    def __call__(self, x: _types.Tree) -> _types.Tree:
+        return self._net(x)

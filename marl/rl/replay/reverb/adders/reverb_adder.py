@@ -34,6 +34,7 @@ class Step(NamedTuple):
     action: _types.Tree
     reward: _types.Tree
     start_of_episode: Union[bool, worlds.ArraySpec, tf.Tensor, Tuple[()]]
+    end_of_episode: Union[bool, worlds.ArraySpec, tf.Tensor, Tuple[()]]
     extras: _types.Tree = ()
 
 
@@ -156,7 +157,10 @@ class ReverbAdder(base.Adder):
             # Record the next observation but leave the history buffer row open by
             # passing `partial_step=True`.
             self._writer.append(
-                dict(observation=timestep.observation, start_of_episode=timestep.first()), partial_step=True
+                dict(
+                    observation=timestep.observation, start_of_episode=timestep.first(), end_of_episode=timestep.last()
+                ),
+                partial_step=True,
             )
             self._write()
             return
@@ -188,6 +192,7 @@ class ReverbAdder(base.Adder):
                     action=tree.map_structure(np.zeros_like, action),
                     reward=tree.map_structure(np.zeros_like, timestep.reward),
                     start_of_episode=timestep.first(),
+                    end_of_episode=timestep.last(),
                     **extras,
                 )
             )
@@ -196,7 +201,10 @@ class ReverbAdder(base.Adder):
         else:
             # Record the next observation and write.
             self._writer.append(
-                dict(observation=timestep.observation, start_of_episode=timestep.first()), partial_step=True
+                dict(
+                    observation=timestep.observation, start_of_episode=timestep.first(), end_of_episode=timestep.last()
+                ),
+                partial_step=True,
             )
             self._write()
 
@@ -224,6 +232,7 @@ class ReverbAdder(base.Adder):
             action=environment_spec.actions,
             reward=environment_spec.rewards,
             start_of_episode=worlds.ArraySpec(shape=(), dtype=bool),
+            end_of_episode=worlds.ArraySpec(shape=(), dtype=bool),
             extras=extras_spec,
         )
         return tree.map_structure_with_path(spec_like_to_tensor_spec, spec_step)

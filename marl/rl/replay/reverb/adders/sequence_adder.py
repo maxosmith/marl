@@ -186,7 +186,6 @@ class SequenceAdder(reverb_adder.ReverbAdder):
             zero_step = tree.map_structure(lambda x: np.zeros_like(x[-2].numpy()), self._writer.history)
             for _ in range(delta):
                 self._writer.append(zero_step)
-
             self._maybe_create_item(self._sequence_length, end_of_episode=True, force=True)
         else:
             raise ValueError(
@@ -266,6 +265,7 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         spec_step = reverb_adder.Step(
             *trajectory_env_spec,
             start_of_episode=tf.TensorSpec(shape=(sequence_length,), dtype=tf.bool, name="start_of_episode"),
+            end_of_episode=tf.TensorSpec(shape=(sequence_length,), dtype=tf.bool, name="end_of_episode"),
             extras=trajectory_extras_spec,
         )
 
