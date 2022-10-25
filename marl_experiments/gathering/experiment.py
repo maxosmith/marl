@@ -39,13 +39,14 @@ class IMPALAConfig:
     frame_key: str = "update_frames"
 
     # Topology.
-    num_training_arenas: int = 4
+    num_training_arenas: int = 1
+    # num_training_arenas: int = 4
 
     # Agent configuration.
     timestep_encoder_ctor: Callable[..., hk.Module] = networks.MLPTimestepEncoder
     # timestep_encoder_ctor: Callable[..., hk.Module] = networks.CNNTimestepEncoder
     timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    memory_core_ctor: Callable[..., hk.Module] = networks.MemoryCore
+    memory_core_ctor: Callable[..., hk.Module] = networks.MemoryLessCore
     memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     policy_head_ctor: Callable[..., hk.Module] = networks.PolicyHead
     policy_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
@@ -70,7 +71,8 @@ class IMPALAConfig:
     replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
     replay_max_size: int = 1_000_000
     samples_per_insert: int = 4
-    min_size_to_sample: int = 200_000
+    min_size_to_sample: int = 1_000
+    # min_size_to_sample: int = 200_000
     max_times_sampled: int = 1
     error_buffer: int = 100
     num_prefetch_threads: Optional[int] = None
@@ -190,7 +192,7 @@ def build_update_node(
     logger = loggers.LoggerManager(
         loggers=[
             loggers.TerminalLogger(time_frequency=5),
-            loggers.TensorboardLogger(result_dir.dir),
+            loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key),
         ],
         time_frequency=5,  # Seconds.
     )
@@ -232,6 +234,7 @@ def build_training_arena_node(
     initial_state_graph: hk.Transformed,
     reverb_handle: lp.CourierHandle,
     learner_update_handle: lp.CourierHandle,
+    counter_handle: lp.CourierHandle,
     game: worlds.Game,
     players,
     result_dir: utils.ResultDirectory,
@@ -264,13 +267,16 @@ def build_training_arena_node(
         random_key=random_key,
         backend="cpu",
     )
+    local_counter = services.Counter(parent=counter_handle)
 
     players[0] = policy
-    logger = loggers.TensorboardLogger(result_dir.dir)
+    logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
     train_arena = arenas.TrainingArena(
         game=game,
         players=players,
         logger=logger,
+        counter=local_counter,
+        step_key=config.step_key,
     )
     return train_arena
 
@@ -316,13 +322,14 @@ def build_evaluation_arena_node(
         random_key=random_key,
     )
     logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
+    local_counter = services.Counter(parent=counter_handle)
 
     return arenas.EvaluationArena(
         agents={0: evaluation_policy},
         bots=opponents,
         scenarios=arenas.evaluation_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
         evaluation_frequency=config.render_frequency,
-        counter=counter_handle,
+        counter=local_counter,
         logger=logger,
         step_key=config.step_key,
     )
@@ -349,13 +356,14 @@ def build_rendering_arena_node(
         variable_source=variable_source,
         random_key=random_key,
     )
+    local_counter = services.Counter(parent=counter_handle)
 
     return render_arena.EvaluationArena(
         agents={0: evaluation_policy},
         bots=opponents,
         scenarios=render_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
         evaluation_frequency=config.render_frequency,
-        counter=counter_handle,
+        counter=local_counter,
         step_key=config.step_key,
         result_dir=result_dir,
     )
@@ -418,6 +426,7 @@ def main(_):
                     initial_state_graph,
                     reverb_handle,
                     learner_update_handle,
+                    counter_handle,
                     game,
                     opponents,
                     result_dir.make_subdir(node_name),
@@ -491,6 +500,7 @@ def main(_):
         # launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
         serialize_py_nodes=False,
         # local_resources=resources,
+        terminal="current_terminal",
     )
 
 

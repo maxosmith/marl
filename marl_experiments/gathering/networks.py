@@ -46,7 +46,7 @@ class MLPTimestepEncoder(hk.Module):
         super().__init__(name=name)
         self.num_actions = num_actions
         self._observation_net = hk.nets.MLP([1024, 512, 256])
-        self._net = hk.nets.MLP([256, 256, 128])
+        self._net = hk.nets.MLP([256, 256])
 
     def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Tree:
         observation = timestep.observation.astype(float)
@@ -83,7 +83,7 @@ class MemoryLessCore(hk.Module):
         super().__init__(name=name)
         self._core = nets.MLPCore([256])
 
-    def __call__(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, nets.MLPCoreState]:
+    def __call__(self, inputs: _types.Tree, state: nets.MLPCoreState) -> Tuple[_types.Tree, nets.MLPCoreState]:
         outputs, new_state = self._core(inputs, state)
         return outputs, new_state
 
@@ -102,7 +102,7 @@ class PolicyHead(hk.Module):
     def __init__(self, num_actions: int, name: Optional[str] = "policy_head"):
         super().__init__(name=name)
         self.num_actions = num_actions
-        self._policy_head = hk.nets.MLP([10, self.num_actions])
+        self._policy_head = hk.nets.MLP([128, 64, 8, self.num_actions])
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         logits = self._policy_head(inputs)  # [B, A]
@@ -112,7 +112,7 @@ class PolicyHead(hk.Module):
 class ValueHead(hk.Module):
     def __init__(self, name: Optional[str] = "value_head"):
         super().__init__(name=name)
-        self._value_head = hk.nets.MLP([10, 1])
+        self._value_head = hk.nets.MLP([128, 64, 1])
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         value = jnp.squeeze(self._value_head(inputs), axis=-1)  # [B]

@@ -6,15 +6,18 @@ from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 class Stopwatch:
     """Stopwatch that maintains a collection of splits."""
 
-    def __init__(self):
+    def __init__(self, buffer_size: Optional[int] = None):
         # List of splits for each key.
         self._times: Mapping[str, List] = collections.defaultdict(list)
         # Whether the stop-watch is running/active for each key.
         self._active: Mapping[str, bool] = {}
+        self._buffer_size = buffer_size
 
     def start(self, key: str):
         if (key in self._active) and self._active[key]:
             raise ValueError(f"Stopwatch already running for `{key}'.")
+        if self._buffer_size and len(self._times[key]) > self._buffer_size:
+            self._times[key] = self._times[key][-self._buffer_size :]
 
         self._times[key].append(time.time())
         self._active[key] = True

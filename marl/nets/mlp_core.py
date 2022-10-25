@@ -43,6 +43,7 @@ class MLPCore(hk.RNNCore):
         return output, prev_state
 
     def initial_state(self, batch_size: Optional[int]) -> MLPCoreState:
+        """Creates an initial state for the network."""
         state = MLPCoreState(dummy=jnp.zeros([1]))
         if batch_size is not None:
             state = tree_utils.add_batch(state, batch_size)

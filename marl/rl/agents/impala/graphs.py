@@ -10,7 +10,8 @@ import tree
 
 from marl import _types, worlds
 from marl.rl.replay.reverb.adders import reverb_adder
-from marl.utils import spec_utils
+from marl.rl.replay.reverb.adders import utils as reverb_utils
+from marl.utils import loggers, spec_utils
 
 
 class IMPALAState(NamedTuple):
@@ -103,46 +104,6 @@ class IMPALA(hk.RNNCore):
             IMPALA loss and logging metrics.
         """
 
-        def _impala_loss(logits, behaviour_logits, actions, values_tm1, values_t, rewards):
-            """IMPALA loss applied to sequential transitions."""
-            # Compute importance sampling weights: current policy / behavior policy.
-            rhos = rlax.categorical_importance_sampling_ratios(logits, behaviour_logits, actions)
-
-            # Critic loss.
-            vtrace_returns = rlax.vtrace_td_error_and_advantage(
-                v_tm1=values_tm1,
-                v_t=values_t,
-                r_t=rewards,
-                discount_t=jnp.full_like(rewards, self._discount),
-                rho_tm1=rhos,
-            )
-            critic_loss = jnp.mean(jnp.square(vtrace_returns.errors))
-
-            # Policy gradient loss.
-            policy_gradient_loss = rlax.policy_gradient_loss(
-                logits_t=logits,
-                a_t=actions,
-                adv_t=vtrace_returns.pg_advantage,
-                w_t=jnp.ones_like(rewards),
-            )
-
-            # Entropy regulariser.
-            entropy_loss = rlax.entropy_loss(logits, w_t=jnp.ones_like(rewards))
-
-            # Combine weighted sum of actor & critic losses, averaged over the sequence.
-            mean_loss = jnp.mean(
-                policy_gradient_loss + self._baseline_cost * critic_loss + self._entropy_cost * entropy_loss
-            )
-            metrics = {
-                "loss": mean_loss,
-                "policy_loss": policy_gradient_loss,
-                "critic_loss": self._baseline_cost * critic_loss,
-                "scaled_critic_loss": critic_loss,
-                "entropy_loss": entropy_loss,
-                "scaled_entropy_loss": self._entropy_cost * entropy_loss,
-            }
-            return mean_loss, metrics
-
         # Extract the data.
         _, actions, rewards, state_and_extras = (
             data.observation,
@@ -153,6 +114,7 @@ class IMPALA(hk.RNNCore):
         initial_state = tree.map_structure(lambda s: s[:, 0], state_and_extras.recurrent_state)
         state_and_extras = state_and_extras._replace(recurrent_state=initial_state)
         behaviour_logits = state_and_extras.logits
+        padding_mask = reverb_utils.padding_mask(data)
 
         # Apply reward clipping.
         rewards = jnp.clip(rewards, -self._max_abs_reward, self._max_abs_reward)
@@ -161,15 +123,86 @@ class IMPALA(hk.RNNCore):
         (logits, values), _ = self.unroll(data, state_and_extras)
 
         # Apply loss function over T.
-        mean_loss, metrics = jax.vmap(_impala_loss, in_axes=0)(  # Apply loss batch-wise.
+        mean_loss, metrics = jax.vmap(impala_loss, in_axes=0)(  # Apply loss batch-wise.
             logits=logits[:, :-1],
             behaviour_logits=behaviour_logits[:, :-1],
             actions=actions[:, :-1],
             values_tm1=values[:, :-1],
             values_t=values[:, 1:],
             rewards=rewards[:, :-1],
+            mask=padding_mask[:, 1:],
         )
+
         mean_loss = jnp.mean(mean_loss)
         metrics = tree.map_structure(jnp.mean, metrics)
         metrics["batch_size"] = actions.shape[0]
         return mean_loss, metrics
+
+
+def impala_loss(
+    logits,
+    behaviour_logits,
+    actions,
+    values_tm1,
+    values_t,
+    rewards,
+    mask,
+    *,
+    discount,
+    baseline_cost,
+    entropy_cost,
+) -> Tuple[_types.Array, loggers.LogData]:
+    """IMPALA loss applied to sequential transitions.
+
+    Args:
+        logits: Logits for the target policy [T, A]
+        behaviour_logits: Logits for the behaviour policy [T, A].
+        values_tm1: State values for t-1 [T].
+        values_t: State values for t [T].
+        rewards: Rewards [T].
+        mask: Mask [T].
+        discount: Discounte factor ().
+        baseline_cost: Baseline cost coefficient ().
+        entropy_cost: Entropy cost coefficient ().
+
+    Returns:
+        Mean loss and additional metrics for logging.
+    """
+    # Compute importance sampling weights: current policy / behavior policy.
+    rhos = rlax.categorical_importance_sampling_ratios(logits, behaviour_logits, actions)
+
+    # Critic loss.
+    vtrace_returns = rlax.vtrace_td_error_and_advantage(
+        v_tm1=values_tm1,
+        v_t=values_t,
+        r_t=rewards,
+        discount_t=jnp.full_like(rewards, discount),
+        rho_tm1=rhos,
+    )
+    critic_loss = jnp.square(vtrace_returns.errors)
+    critic_loss = critic_loss * mask
+    critic_loss = jnp.mean(critic_loss)
+
+    # Policy gradient loss.
+    policy_gradient_loss = rlax.policy_gradient_loss(
+        logits_t=logits,
+        a_t=actions,
+        adv_t=vtrace_returns.pg_advantage,
+        w_t=mask.astype(float),
+    )
+    policy_gradient_loss = jnp.mean(policy_gradient_loss)
+
+    # Entropy regulariser.
+    entropy_loss = rlax.entropy_loss(logits, w_t=mask.astype(float))
+
+    # Combine weighted sum of actor & critic losses, averaged over the sequence.
+    mean_loss = policy_gradient_loss + baseline_cost * critic_loss + entropy_cost * entropy_loss
+    metrics = {
+        "loss": mean_loss,
+        "policy_loss": policy_gradient_loss,
+        "critic_loss": critic_loss,
+        "scaled_critic_loss": baseline_cost * critic_loss,
+        "entropy_loss": entropy_loss,
+        "scaled_entropy_loss": entropy_cost * entropy_loss,
+    }
+    return mean_loss, metrics

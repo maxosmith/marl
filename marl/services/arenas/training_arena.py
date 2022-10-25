@@ -9,6 +9,7 @@ import tree
 from absl import logging
 
 from marl import _types, individuals, utils, worlds
+from marl.services import counter as counter_lib
 from marl.services.arenas import base
 from marl.utils import dict_utils, loggers, signals, spec_utils, time_utils, tree_utils
 from marl.utils.loggers.base import LogData
@@ -58,7 +59,15 @@ class TrainingArena(base.ArenaInterface):
 
     game: worlds.Game
     players: Mapping[_types.PlayerID, individuals.Individual]
-    logger: Optional[loggers.Logger] = None
+    logger: loggers.Logger
+    counter: Optional[counter_lib.Counter] = None
+    step_key: Optional[str] = None
+
+    def __post_init__(self):
+        if self.counter and not self.step_key:
+            raise ValueError("Must specify step key with counter.")
+        if self.step_key and not self.counter:
+            raise ValueError("Must specify counter with step key.")
 
     def run_episode(self) -> EpisodeResult:
         """Run one episode."""
@@ -127,7 +136,7 @@ class TrainingArena(base.ArenaInterface):
             return episodes_finished or timesteps_finished
 
         episode_count, timestep_count = 0, 0
-        stopwatch = utils.Stopwatch()
+        stopwatch = utils.Stopwatch(buffer_size=100)
 
         with signals.runtime_terminator():
             while not _should_terminate(episodes=episode_count, timesteps=timestep_count):
@@ -141,6 +150,8 @@ class TrainingArena(base.ArenaInterface):
                 logdata["episodes_per_second"] = stopwatch.get_splits(aggregate_fn=time_utils.mean_per_second)[
                     _StopwatchKeys.EPISODE.value
                 ]
+                if self.counter:
+                    logdata[self.step_key] = self.counter.get_counts().get(self.step_key, 0)
                 self.logger.write(logdata)
 
     def _maybe_sychronize_agent_parameters(self):
