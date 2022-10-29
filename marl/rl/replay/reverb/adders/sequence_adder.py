@@ -62,8 +62,6 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         priority_fns: Optional[reverb_adder.PriorityFnMapping] = None,
         max_in_flight_items: Optional[int] = 2,
         end_of_episode_behavior: Optional[EndBehavior] = None,
-        # Deprecated kwargs.
-        chunk_length: Optional[int] = None,
         pad_end_of_episode: Optional[bool] = None,
         break_end_of_episode: Optional[bool] = None,
         validate_items: bool = True,
@@ -85,7 +83,6 @@ class SequenceAdder(reverb_adder.ReverbAdder):
             end_of_episode_behavior:  Determines how sequences at the end of the
                 episode are handled (default `EndOfEpisodeBehavior.ZERO_PAD`). See
                 the docstring for `EndOfEpisodeBehavior` for more information.
-            chunk_length: Deprecated and unused.
             pad_end_of_episode: If True (default) then upon end of episode the current
                 sequence will be padded (with observations, actions, etc... whose values
                 are 0) until its length is `sequence_length`. If False then the last
@@ -96,7 +93,6 @@ class SequenceAdder(reverb_adder.ReverbAdder):
                 before they are sent to the server. This requires table signature to be
                 fetched from the server and cached locally.
         """
-        del chunk_length
         super().__init__(
             client=client,
             # We need an additional space in the buffer for the partial step the
@@ -194,7 +190,6 @@ class SequenceAdder(reverb_adder.ReverbAdder):
             )
 
     def _maybe_create_item(self, sequence_length: int, *, end_of_episode: bool = False, force: bool = False):
-
         # Check conditions under which a new item is created.
         first_write = self._writer.episode_steps == sequence_length
         # NOTE(bshahr): the following line assumes that the only way sequence_length
@@ -270,3 +265,14 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         )
 
         return spec_step
+
+
+def get_history(writer):
+    base_history = writer.history
+    # Get the internal references to the data in C.
+    history = tree.map_structure(lambda x: x._data_references, base_history)
+    # Convert the data into Python numpy objects, ignoring entries in partial rows.
+    history = tree.map_structure(lambda x: x.numpy() if x else x, history)
+    # Numpy-ify the lists of numpy objects (which was original just lists of references).
+    history = tree.map_structure_up_to(base_history, lambda *x: np.stack(x), history)
+    return history

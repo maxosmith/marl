@@ -4,7 +4,7 @@ import numpy as np
 from absl.testing import absltest, parameterized
 
 from marl import _types, worlds
-from marl.rl.agents.impala import example_networks, graphs
+from marl.rl.agents.impala import example_networks, impala
 
 
 class GraphsTest(parameterized.TestCase):
@@ -12,7 +12,7 @@ class GraphsTest(parameterized.TestCase):
 
     @hk.testing.transform_and_run
     def test_step(self):
-        impala = graphs.IMPALA(
+        impala = impala.IMPALA(
             timestep_encoder=example_networks.TimestepEncoder(),
             memory_core=example_networks.MemoryCore(),
             policy_head=example_networks.PolicyHead(num_actions=3),

@@ -9,12 +9,12 @@ from marl.utils import mocks, spec_utils
 
 
 def build_computational_graphs(env_spec: worlds.EnvironmentSpec):
-    from marl.rl.agents.impala import graphs
+    from marl.rl.agents.impala import impala
 
     timestep = spec_utils.zeros_from_spec(env_spec)
 
     def _impala():
-        impala = graphs.IMPALA(
+        impala = impala.IMPALA(
             timestep_encoder=example_networks.TimestepEncoder(),
             memory_core=example_networks.MemoryCore(),
             policy_head=example_networks.PolicyHead(num_actions=3),

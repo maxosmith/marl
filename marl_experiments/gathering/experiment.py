@@ -1,7 +1,6 @@
 import dataclasses
 import functools
-from ast import Call
-from random import random
+import importlib
 from typing import Any, Callable, List, Mapping, Optional, Union
 
 import haiku as hk
@@ -16,7 +15,7 @@ from marl_experiments.gathering.services import render_arena
 
 from marl import _types, bots, games, individuals, services, utils, worlds
 from marl.rl.agents import impala
-from marl.rl.agents.impala import graphs
+from marl.rl.agents.impala import impala
 from marl.rl.replay.reverb import adders as reverb_adders
 from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
@@ -43,14 +42,13 @@ class IMPALAConfig:
     # num_training_arenas: int = 4
 
     # Agent configuration.
-    timestep_encoder_ctor: Callable[..., hk.Module] = networks.MLPTimestepEncoder
-    # timestep_encoder_ctor: Callable[..., hk.Module] = networks.CNNTimestepEncoder
+    timestep_encoder_ctor: str = "marl_experiments.gathering.networks.MLPTimestepEncoder"
     timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    memory_core_ctor: Callable[..., hk.Module] = networks.MemoryLessCore
+    memory_core_ctor: str = "marl_experiments.gathering.networks.MemoryLessCore"
     memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    policy_head_ctor: Callable[..., hk.Module] = networks.PolicyHead
+    policy_head_ctor: str = "marl_experiments.gathering.networks.PolicyHead"
     policy_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    value_head_ctor: Callable[..., hk.Module] = networks.ValueHead
+    value_head_ctor: str = "marl_experiments.gathering.networks.ValueHead"
     value_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     # Optimizer configuration.
@@ -63,7 +61,7 @@ class IMPALAConfig:
     max_gradient_norm: float = 40.0
 
     # Loss configuration.
-    baseline_cost: float = 0.5
+    baseline_cost: float = 0.25
     entropy_cost: float = 0.01
     max_abs_reward: float = np.inf
 
@@ -71,8 +69,8 @@ class IMPALAConfig:
     replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
     replay_max_size: int = 1_000_000
     samples_per_insert: int = 4
-    min_size_to_sample: int = 1_000
-    # min_size_to_sample: int = 200_000
+    # min_size_to_sample: int = 1_000
+    min_size_to_sample: int = 200_000
     max_times_sampled: int = 1
     error_buffer: int = 100
     num_prefetch_threads: Optional[int] = None
@@ -100,15 +98,25 @@ def build_game():
     return game
 
 
+def str_to_class(path: str) -> Any:
+    tokens = path.split(".")
+    module = ".".join(tokens[:-1])
+    name = tokens[-1]
+    module = importlib.import_module(module)
+    return getattr(module, name)
+
+
 def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec):
     timestep = spec_utils.zeros_from_spec(env_spec)
 
     def _impala_graphs():
         num_actions = env_spec.action.num_values
-        timestep_encoder = config.timestep_encoder_ctor(num_actions=num_actions, **config.timestep_encoder_kwargs)
-        memory_core = config.memory_core_ctor(**config.memory_core_kwargs)
-        policy_head = config.policy_head_ctor(num_actions=num_actions, **config.policy_head_kwargs)
-        value_head = config.value_head_ctor(**config.value_head_kwargs)
+        timestep_encoder = str_to_class(config.timestep_encoder_ctor)(
+            num_actions=num_actions, **config.timestep_encoder_kwargs
+        )
+        memory_core = str_to_class(config.memory_core_ctor)(**config.memory_core_kwargs)
+        policy_head = str_to_class(config.policy_head_ctor)(num_actions=num_actions, **config.policy_head_kwargs)
+        value_head = str_to_class(config.value_head_ctor)(**config.value_head_kwargs)
 
         impala_kwargs = dict(
             # Sub-modules.
@@ -123,8 +131,8 @@ def build_computational_graphs(config: IMPALAConfig, env_spec: worlds.Environmen
             entropy_cost=config.entropy_cost,
         )
 
-        train_impala = graphs.IMPALA(evaluation=False, **impala_kwargs)
-        eval_impala = graphs.IMPALA(evaluation=True, **impala_kwargs)
+        train_impala = impala.IMPALA(evaluation=False, **impala_kwargs)
+        eval_impala = impala.IMPALA(evaluation=True, **impala_kwargs)
 
         def init():
             return train_impala(timestep, train_impala.initial_state(None))
@@ -150,7 +158,7 @@ def build_reverb_node(config: IMPALAConfig, env_spec: worlds.EnvironmentSpec, st
     def _build_reverb_node(
         env_spec: worlds.EnvironmentSpec, sequence_length: int, table_name: str
     ) -> List[reverb.Table]:
-        signature = signature = reverb_adders.SequenceAdder.signature(
+        signature = reverb_adders.SequenceAdder.signature(
             env_spec,
             state_spec,
             sequence_length=sequence_length,
@@ -270,6 +278,7 @@ def build_training_arena_node(
     local_counter = services.Counter(parent=counter_handle)
 
     players[0] = policy
+
     logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
     train_arena = arenas.TrainingArena(
         game=game,
@@ -369,9 +378,8 @@ def build_rendering_arena_node(
     )
 
 
-def main(_):
-    config = IMPALAConfig()
-    result_dir = utils.ResultDirectory(config.result_dir, overwrite=True)
+def run(config: Optional[IMPALAConfig] = None, exist_ok: bool = False, overwrite: bool = True):
+    result_dir = utils.ResultDirectory(config.result_dir, exist_ok, overwrite=overwrite)
 
     random_key = jax.random.PRNGKey(config.seed)
     game = build_game()
@@ -435,56 +443,49 @@ def main(_):
 
     with program.group("evaluation_arena"):
         resources[program._current_group] = dict(cpu=1, ram=10)
+
+        # Policy evaluation.
         random_key, subkey = jax.random.split(random_key)
-
-        program.add_node(
-            build_evaluation_arena_node(
-                config,
-                train_policy_graph,
-                initial_state_graph,
-                subkey,
-                learner_update_handle,
-                opponents,
-                counter_handle,
-                result_dir.make_subdir(program._current_group),
-            )
+        evaluation_node = build_evaluation_arena_node(
+            config,
+            train_policy_graph,
+            initial_state_graph,
+            subkey,
+            learner_update_handle,
+            opponents,
+            counter_handle,
+            result_dir.make_subdir(program._current_group),
         )
-        resources[program._current_group] = dict(cpu=1, ram=10)
-
-    with program.group("render_arena"):
-        resources[program._current_group] = dict(cpu=1, ram=10)  # Same for each node in group.
 
         # Training rendering.
-        train_name = f"{program._current_group}_train"
+        train_name = f"{program._current_group}_render_train"
         random_key, subkey = jax.random.split(random_key)
-        program.add_node(
-            build_rendering_arena_node(
-                config,
-                train_policy_graph,
-                initial_state_graph,
-                subkey,
-                learner_update_handle,
-                opponents,
-                counter_handle,
-                result_dir.make_subdir(train_name),
-            )
+        train_render_node = build_rendering_arena_node(
+            config,
+            train_policy_graph,
+            initial_state_graph,
+            subkey,
+            learner_update_handle,
+            opponents,
+            counter_handle,
+            result_dir.make_subdir(train_name),
         )
 
         # Evaluation rendering.
-        eval_name = f"{program._current_group}_eval"
+        eval_name = f"{program._current_group}_render_eval"
         random_key, subkey = jax.random.split(random_key)
-        program.add_node(
-            build_rendering_arena_node(
-                config,
-                eval_policy_graph,
-                initial_state_graph,
-                subkey,
-                learner_update_handle,
-                opponents,
-                counter_handle,
-                result_dir.make_subdir(eval_name),
-            )
+        eval_render_node = build_rendering_arena_node(
+            config,
+            eval_policy_graph,
+            initial_state_graph,
+            subkey,
+            learner_update_handle,
+            opponents,
+            counter_handle,
+            result_dir.make_subdir(eval_name),
         )
+
+        program.add_node(lp.MultiThreadingColocation([evaluation_node, train_render_node, eval_render_node]))
 
     with program.group("saver"):
         program.add_node(
@@ -502,6 +503,11 @@ def main(_):
         # local_resources=resources,
         terminal="current_terminal",
     )
+
+
+def main(_):
+    """Enables running the file directly through absl, and also running with a config input."""
+    run()
 
 
 if __name__ == "__main__":

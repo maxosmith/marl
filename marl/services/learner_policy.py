@@ -43,9 +43,6 @@ class LearnerPolicy:
         self._initial_state_fn = jax.jit(initial_state_fn.apply, backend=backend)
 
     def step(self, timestep: worlds.TimeStep, state: Optional[_types.Tree] = None):
-        if timestep.first():
-            state = self.episode_reset(timestep)
-
         self._random_key, subkey = jax.random.split(self._random_key)
         action, new_state = self._policy_fn(self._variable_source.params, subkey, timestep, state)
         action = tree_utils.to_numpy(action)

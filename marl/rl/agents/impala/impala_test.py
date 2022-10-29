@@ -10,7 +10,7 @@ import tree
 from absl.testing import absltest, parameterized
 
 from marl import _types, games
-from marl.rl.agents.impala import example_networks, graphs
+from marl.rl.agents.impala import example_networks, impala
 
 
 class ImpalaLossTest(parameterized.TestCase):
@@ -52,7 +52,7 @@ class ImpalaLossTest(parameterized.TestCase):
         impala_loss = self.variant(
             jax.vmap(
                 functools.partial(
-                    graphs.impala_loss, discount=0.99, baseline_cost=baseline_cost, entropy_cost=entropy_cost
+                    impala.impala_loss, discount=0.99, baseline_cost=baseline_cost, entropy_cost=entropy_cost
                 )
             )
         )

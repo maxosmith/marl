@@ -2,6 +2,7 @@
 # pylint: disable=unused-import
 
 from marl.services.counter import Counter
+from marl.services.demonstration_policy import DemonstrationPolicy
 from marl.services.evaluation_policy import EvaluationPolicy
 from marl.services.interfaces.learner_interface import LearnerInterface
 from marl.services.interfaces.saveable_interface import SaveableInterface

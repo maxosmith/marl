@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from marl import _types, nets, worlds
-from marl.rl.agents.impala.graphs import IMPALAState
+from marl.rl.agents.impala.impala import IMPALAState
 
 
 class CNNTimestepEncoder(hk.Module):
@@ -45,15 +45,15 @@ class MLPTimestepEncoder(hk.Module):
     def __init__(self, num_actions: int, name: Optional[str] = "timestep_encoder"):
         super().__init__(name=name)
         self.num_actions = num_actions
-        self._observation_net = hk.nets.MLP([1024, 512, 256])
-        self._net = hk.nets.MLP([256, 256])
+        self._observation_net = hk.nets.MLP([512, 256], activate_final=True)
+        self._net = hk.nets.MLP([256, 256], activate_final=True)
 
     def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Tree:
         observation = timestep.observation.astype(float)
         # Flatten assumes there is a leading batch dimension: [B, H, W, C].
         observation = jnp.ravel(observation) if len(observation.shape) == 3 else hk.Flatten()(observation)
         h = self._observation_net(observation)
-        action = jax.nn.one_hot(state.prev_action, self.num_actions)
+        action = jax.nn.one_hot(state.prev_action, num_classes=self.num_actions, axis=-1)
         h = jnp.concatenate([h, action], axis=-1)
         return self._net(h)
 
@@ -102,7 +102,7 @@ class PolicyHead(hk.Module):
     def __init__(self, num_actions: int, name: Optional[str] = "policy_head"):
         super().__init__(name=name)
         self.num_actions = num_actions
-        self._policy_head = hk.nets.MLP([128, 64, 8, self.num_actions])
+        self._policy_head = hk.Linear(self.num_actions)
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         logits = self._policy_head(inputs)  # [B, A]
@@ -112,7 +112,7 @@ class PolicyHead(hk.Module):
 class ValueHead(hk.Module):
     def __init__(self, name: Optional[str] = "value_head"):
         super().__init__(name=name)
-        self._value_head = hk.nets.MLP([128, 64, 1])
+        self._value_head = hk.Linear(1)
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         value = jnp.squeeze(self._value_head(inputs), axis=-1)  # [B]

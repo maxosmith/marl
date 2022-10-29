@@ -8,11 +8,13 @@ from typing import NamedTuple, Optional, Sequence
 
 import haiku as hk
 import jax
+import numpy as np
 import optax
 import reverb
 from absl import logging
 
 from marl import _types, services
+from marl.rl.replay.reverb.adders import utils as reverb_utils
 from marl.services import counter as counter_lib
 from marl.utils import distributed_utils, loggers
 
@@ -109,12 +111,12 @@ class LearnerUpdate:
         """Perform a single update step."""
         reverb_sample = next(self._data_iterator)
 
-        # TODO(maxsmith): The random key needs to be split, but only by-device.
-        # IMPALA doesn't use RNG during updating, so this isn't a bug right now.
-        # self._random_key, subkey = jax.random.split(self._random_key)
+        split_key = jax.random.split(self._random_key)
+        self._random_key, subkey = split_key[:, 0], split_key[:, 1]  # Ignore device axis.
+
         self._state, metrics = self._update_step(
             params=self._state.params,
-            rng=self._random_key,
+            rng=subkey,
             opt_state=self._state.opt_state,
             sample=reverb_sample.data,
         )

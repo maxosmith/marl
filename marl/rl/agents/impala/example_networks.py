@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from marl import _types, worlds
-from marl.rl.agents.impala.graphs import IMPALAState
+from marl.rl.agents.impala.impala import IMPALAState
 
 
 class TimestepEncoder(hk.Module):

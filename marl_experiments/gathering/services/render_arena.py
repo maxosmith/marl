@@ -61,7 +61,7 @@ class EvaluationArena(base.ArenaInterface):
         agents:
         bots:
         scenarios:
-        evaluation_frequncy: Frequency, in seconds, to run evaluation.
+        evaluation_frequncy:
         logger:
     """
 

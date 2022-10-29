@@ -2,6 +2,8 @@
 
 import abc
 import time
+from os import times
+from symbol import namedexpr_test
 from typing import (
     Callable,
     Iterable,
@@ -158,20 +160,17 @@ class ReverbAdder(base.Adder):
             # passing `partial_step=True`.
             self._writer.append(
                 dict(
-                    observation=timestep.observation, start_of_episode=timestep.first(), end_of_episode=timestep.last()
+                    observation=timestep.observation,
+                    start_of_episode=timestep.first(),
+                    end_of_episode=timestep.last(),
                 ),
                 partial_step=True,
             )
             self._write()
             return
 
-        # Add the timestep to the buffer.
-        has_extras = (
-            len(extras) > 0
-            if isinstance(extras, Sized)  # pylint: disable=g-explicit-length-test
-            else extras is not None
-        )
-
+        # Complete the remaining row's information that was started during the previous timestep.
+        has_extras = len(extras) > 0 if isinstance(extras, Sized) else extras is not None
         current_step = dict(
             # Observation was passed at the previous add call.
             action=action,
@@ -181,32 +180,23 @@ class ReverbAdder(base.Adder):
         )
         self._writer.append(current_step)
 
+        # Start the next row with the new observation.
+        self._writer.append(
+            dict(
+                observation=timestep.observation,
+                start_of_episode=timestep.first(),
+                end_of_episode=timestep.last(),
+            ),
+            partial_step=True,
+        )
+        self._write()
+
         if timestep.last():
-            # Complete the row by appending zeros to remaining open fields.
-            # TODO(b/183945808): remove this when fields are no longer expected to be
-            # of equal length on the learner side.
-            extras = {"extras": extras} if has_extras else {}
-            self._writer.append(
-                dict(
-                    observation=timestep.observation,
-                    action=tree.map_structure(np.zeros_like, action),
-                    reward=tree.map_structure(np.zeros_like, timestep.reward),
-                    start_of_episode=timestep.first(),
-                    end_of_episode=timestep.last(),
-                    **extras,
-                )
-            )
+            # Complete the last row by filling the remaining fields with zeros.
+            dummy_step = tree.map_structure(np.zeros_like, current_step)
+            self._writer.append(dummy_step)
             self._write_last()
             self.reset()
-        else:
-            # Record the next observation and write.
-            self._writer.append(
-                dict(
-                    observation=timestep.observation, start_of_episode=timestep.first(), end_of_episode=timestep.last()
-                ),
-                partial_step=True,
-            )
-            self._write()
 
     @classmethod
     def signature(cls, environment_spec: worlds.EnvironmentSpec, extras_spec: worlds.TreeSpec = ()):

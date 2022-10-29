@@ -76,7 +76,7 @@ class TrainingArena(base.ArenaInterface):
         stopwatch = utils.Stopwatch()
 
         timesteps = self.game.reset()
-        states = {id: None for id in self.players.keys()}
+        player_states = {id: player.episode_reset(timesteps[id]) for id, player in self.players.items()}
         while not np.any([ts.last() for ts in timesteps.values()]):
             stopwatch.start(_StopwatchKeys.STEP.value)
 
@@ -84,7 +84,7 @@ class TrainingArena(base.ArenaInterface):
             stopwatch.start(_StopwatchKeys.ACTION.value)
             actions = {}
             for id, player in self.players.items():
-                actions[id], states[id] = player.step(timesteps[id], states[id])
+                actions[id], player_states[id] = player.step(timesteps[id], player_states[id])
             stopwatch.stop(_StopwatchKeys.ACTION.value)
 
             # Environment transition.
@@ -104,7 +104,7 @@ class TrainingArena(base.ArenaInterface):
 
         # Inform the agent of the last timestep for logging.
         for id, player in self.players.items():
-            player.step(timesteps[id], states[id])
+            player.step(timesteps[id], player_states[id])
 
         times = stopwatch.get_splits(aggregate_fn=time_utils.mean_per_second)
         return EpisodeResult(
