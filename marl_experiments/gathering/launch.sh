@@ -36,3 +36,4 @@ conda activate model38
 #eval $1
 
 python sweep_worker.py --config_dir=$1
+# python experiment_dqn.py

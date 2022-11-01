@@ -7,7 +7,7 @@ import numpy as np
 import tree
 
 from marl import _types
-from marl.rl.replay.reverb.adders import reverb_adder
+from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import array_utils, tree_utils
 
 

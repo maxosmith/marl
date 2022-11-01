@@ -155,7 +155,7 @@ def run_actor(
 ):
     """Runs an actor to produce num_trajectories trajectories."""
     game = games.Gathering(n_agents=1, global_observation=True, map_name="default_small")
-    game = wrappers.TimeLimit(game, num_steps=20)
+    game = wrappers.TimeLimit(game, num_steps=100)
     env = wrappers.GameToEnv(game, player_id=0)
     state = env.reset()
     traj = []

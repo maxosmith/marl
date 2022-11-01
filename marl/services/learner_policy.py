@@ -5,8 +5,8 @@ import jax
 from absl import logging
 
 from marl import _types, worlds
-from marl.rl.replay.reverb.adders import reverb_adder
 from marl.services import interfaces
+from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import tree_utils
 
 
@@ -47,10 +47,9 @@ class LearnerPolicy:
         action, new_state = self._policy_fn(self._variable_source.params, subkey, timestep, state)
         action = tree_utils.to_numpy(action)
 
-        if not timestep.first() and self._reverb_adder:
-            # Record observation and action to Reverb. Not done on the first timestep to
-            # prevent double-logging this timestep.
-            self._reverb_adder.add(action=action, timestep=timestep, extras=new_state)
+        if self._reverb_adder:
+            self._reverb_adder.add(timestep=timestep, action=action, extras=new_state)
+
         if not self._per_episode_update:
             # Maybe update variables with the latest copy from the updater.
             self._variable_source.update(wait=False)
@@ -59,17 +58,12 @@ class LearnerPolicy:
     def episode_reset(self, timestep: worlds.TimeStep):
         self._random_key, subkey = jax.random.split(self._random_key)
         state = self._initial_state_fn(None, subkey, batch_size=None)
-
         # Start a new episode in the replay buffer.
         if not timestep.first():
             raise ValueError("Reset must be called after the first timestep.")
-        if self._reverb_adder:
-            self._reverb_adder.add(timestep=timestep)
-
         # Maybe update variables with the latest copy from the updater.
         if self._per_episode_update:
             self._variable_source.update_and_wait()
-
         return state
 
     def sync_params(self):

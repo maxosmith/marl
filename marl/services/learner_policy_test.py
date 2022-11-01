@@ -3,13 +3,13 @@ import jax
 from absl.testing import absltest, parameterized
 
 from marl import games, worlds
-from marl.rl.agents.impala import example_networks
+from marl.agents.impala import example_networks
 from marl.services import learner_policy
 from marl.utils import mocks, spec_utils
 
 
 def build_computational_graphs(env_spec: worlds.EnvironmentSpec):
-    from marl.rl.agents.impala import impala
+    from marl.agents.impala import impala
 
     timestep = spec_utils.zeros_from_spec(env_spec)
 

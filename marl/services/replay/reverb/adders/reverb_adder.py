@@ -23,7 +23,7 @@ import tree
 from absl import logging
 
 from marl import _types, worlds
-from marl.rl.replay.reverb.adders import base
+from marl.services.replay.reverb.adders import base
 
 DEFAULT_PRIORITY_TABLE = "priority_table"
 _MIN_WRITER_LIFESPAN_SECONDS = 60
@@ -155,48 +155,39 @@ class ReverbAdder(base.Adder):
 
     def add(self, timestep: dm_env.TimeStep, action: _types.Tree = None, extras: _types.Tree = ()):
         """Record an action and the following timestep."""
-        if timestep.first():
-            # Record the next observation but leave the history buffer row open by
-            # passing `partial_step=True`.
-            self._writer.append(
-                dict(
-                    observation=timestep.observation,
-                    start_of_episode=timestep.first(),
-                    end_of_episode=timestep.last(),
-                ),
-                partial_step=True,
-            )
-            self._write()
-            return
+        if not timestep.first():
+            # Complete the remaining row's information that was started during the previous timestep.
+            self._writer.append(dict(reward=timestep.reward))
 
-        # Complete the remaining row's information that was started during the previous timestep.
         has_extras = len(extras) > 0 if isinstance(extras, Sized) else extras is not None
         current_step = dict(
-            # Observation was passed at the previous add call.
+            observation=timestep.observation,
+            start_of_episode=timestep.first(),
+            end_of_episode=timestep.last(),
             action=action,
-            reward=timestep.reward,
-            # Start of episode indicator was passed at the previous add call.
             **({"extras": extras} if has_extras else {}),
         )
-        self._writer.append(current_step)
 
-        # Start the next row with the new observation.
-        self._writer.append(
-            dict(
-                observation=timestep.observation,
-                start_of_episode=timestep.first(),
-                end_of_episode=timestep.last(),
-            ),
-            partial_step=True,
-        )
-        self._write()
+        if timestep.first() or timestep.mid():
+            # Start a new row based on the current observation. We write a partial row, because we are
+            # awaiting the reward that is received for the action.
+            self._writer.append(current_step, partial_step=True)
+            self._write()
 
-        if timestep.last():
-            # Complete the last row by filling the remaining fields with zeros.
+        elif timestep.last():
+            # Place the final row which only contains the last observation for bootstrapping.
+            # The remainder of the fields must be filled with dummy values for shape-correctness.
             dummy_step = tree.map_structure(np.zeros_like, current_step)
+            dummy_step["observation"] = timestep.observation
+            dummy_step["start_of_episode"] = timestep.first()
+            dummy_step["end_of_episode"] = timestep.last()
+            dummy_step["reward"] = tree.map_structure(np.zeros_like, timestep.reward)
             self._writer.append(dummy_step)
             self._write_last()
             self.reset()
+
+        else:
+            raise ValueError(f"Unknown timestep type: {timestep.step_type}.")
 
     @classmethod
     def signature(cls, environment_spec: worlds.EnvironmentSpec, extras_spec: worlds.TreeSpec = ()):

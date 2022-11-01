@@ -10,9 +10,9 @@ from absl import app
 from marl_experiments.gathering import networks
 
 from marl import games, services
-from marl.rl.agents.impala import impala
-from marl.rl.replay.reverb import adders
-from marl.rl.replay.reverb.adders import reverb_adder
+from marl.agents.impala import impala
+from marl.services.replay.reverb import adders
+from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import wrappers
 
 

@@ -14,8 +14,8 @@ import reverb
 from absl.testing import absltest
 
 from marl import games
+from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import spec_utils
-from marl.rl.replay.reverb import adders as reverb_adders
 
 _TABLE = "table"
 

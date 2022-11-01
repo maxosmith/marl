@@ -402,11 +402,11 @@ class Gathering(worlds.Game):
         draw = ImageDraw.Draw(img)
         scale = self.scale
 
-        p1_state = self.state_n[0].reshape(self.viewbox_width, self.viewbox_depth, 4)
+        p1_state = self.state_n[0].reshape(self.viewbox_width, self.viewbox_depth, 5)
         p1_state = p1_state[:, ::-1]
         for x in range(self.viewbox_width):
             for y in range(self.viewbox_depth):
-                food, me, other, wall = p1_state[x, y]
+                food, me, other, wall, _ = p1_state[x, y]
                 assert sum((food, me, other, wall)) <= 1
                 if food:
                     draw.rectangle([(x * scale, y * scale), ((x + 1) * scale, (y + 1) * scale)], fill=(0, 255, 0))

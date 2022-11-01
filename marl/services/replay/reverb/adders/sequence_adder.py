@@ -12,7 +12,7 @@ import tensorflow as tf
 import tree
 
 from marl import worlds
-from marl.rl.replay.reverb.adders import reverb_adder, utils
+from marl.services.replay.reverb.adders import reverb_adder, utils
 
 
 class EndBehavior(enum.Enum):
@@ -267,7 +267,8 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         return spec_step
 
 
-def get_history(writer):
+def _get_history(writer):
+    """Internal function useful for debugging the adder."""
     base_history = writer.history
     # Get the internal references to the data in C.
     history = tree.map_structure(lambda x: x._data_references, base_history)

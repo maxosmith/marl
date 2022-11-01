@@ -11,8 +11,8 @@ import rlax
 import tree
 
 from marl import _types, worlds
-from marl.rl.replay.reverb.adders import reverb_adder
-from marl.rl.replay.reverb.adders import utils as reverb_utils
+from marl.services.replay.reverb.adders import reverb_adder
+from marl.services.replay.reverb.adders import utils as reverb_utils
 from marl.utils import loggers, spec_utils
 
 
@@ -38,7 +38,7 @@ class IMPALA(hk.RNNCore):
         baseline_cost: float = 1.0,
         entropy_cost: float = 0.0,
         name: Optional[str] = "impala",
-    ) -> None:
+    ):
         """Initialize an instance of the IMPALA algorithm's computational graphs.
 
         Args:
@@ -63,7 +63,7 @@ class IMPALA(hk.RNNCore):
         if not hasattr(self._policy_head, "num_actions"):
             raise ValueError("Policy head must have attribute `num_actions`.")
 
-    def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Action:
+    def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> Tuple[_types.Action, IMPALAState]:
         embeddings = self._timestep_encoder(timestep, state)
         embeddings, new_recurrent_state = self._memory_core(embeddings, state.recurrent_state)
         logits = self._policy_head(embeddings)

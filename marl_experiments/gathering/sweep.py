@@ -9,21 +9,23 @@ from marl_experiments.gathering import experiment
 from marl import utils
 from marl.utils import hyper
 
-flags.DEFINE_string("result_dir", "/scratch/wellman_root/wellman1/mxsmith/tests/impala_sweep", "")
+flags.DEFINE_string("result_dir", "/scratch/wellman_root/wellman1/mxsmith/tests/impala_sweep2", "")
 FLAGS = flags.FLAGS
 
 
 def get_sweep() -> hyper.Sweep:
     return hyper.product(
         [
-            hyper.sweep("entropy_cost", [0.01, 0.02, 0.001, 0.05]),
-            hyper.sweep("baseline_cost", [0.25, 0.2, 0.1, 0.3]),
+            hyper.sweep("batch_size", [32, 64]),
+            hyper.sweep("learning_rate", [3e-3, 6e-3, 3e-4, 6e-4]),
+            hyper.sweep("baseline_cost", [0.5, 0.25, 0.1]),
+            hyper.sweep("entropy_cost", [0.01, 0.02]),
         ]
     )
 
 
 def main(_):
-    config = experiment.IMPALAConfig()
+    config = experiment.Config()
     sweeps = hyper.default(config, get_sweep())
     result_dir = utils.ResultDirectory(FLAGS.result_dir, overwrite=True)
 

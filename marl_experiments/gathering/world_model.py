@@ -8,8 +8,8 @@ import numpy as np
 import tree
 
 from marl import _types, worlds
-from marl.rl.replay.reverb.adders import reverb_adder
-from marl.rl.replay.reverb.adders import utils as reverb_utils
+from marl.services.replay.reverb.adders import reverb_adder
+from marl.services.replay.reverb.adders import utils as reverb_utils
 from marl.utils import spec_utils
 
 

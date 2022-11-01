@@ -8,14 +8,16 @@ from typing import NamedTuple, Optional, Sequence
 
 import haiku as hk
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 import reverb
+import tree
 from absl import logging
 
 from marl import _types, services
-from marl.rl.replay.reverb.adders import utils as reverb_utils
 from marl.services import counter as counter_lib
+from marl.services.replay.reverb.adders import utils as reverb_utils
 from marl.utils import distributed_utils, loggers
 
 
@@ -125,6 +127,13 @@ class LearnerUpdate:
         # NOTE: This measure will be a noisy estimate for the purposes
         #  of the logs as it does not pmean over all devices.
         metrics = distributed_utils.get_from_first_device(metrics)
+
+        # Reverb metadata.
+        metrics["replay/times_sampled"] = jnp.mean(reverb_sample.info.times_sampled)
+        metrics["replay/priority"] = jnp.mean(reverb_sample.info.priority)
+        metrics["replay/probability"] = jnp.mean(reverb_sample.info.probability)
+        metrics["replay/table_size"] = jnp.mean(reverb_sample.info.table_size)
+
         if self._counter:
             counts = self._counter.increment(
                 **{

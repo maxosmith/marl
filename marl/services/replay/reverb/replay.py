@@ -2,10 +2,11 @@
 import dataclasses
 from typing import Callable, Iterator, Optional
 
-from . import spec_utils
-from marl.rl.replay.reverb import adders, dataset
-
 import reverb
+
+from marl.services.replay.reverb import adders, dataset
+
+from . import spec_utils
 
 
 @dataclasses.dataclass

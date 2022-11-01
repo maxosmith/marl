@@ -1,8 +1,8 @@
 """Adders for Reverb replay buffers."""
 # pylint: disable=unused-import
 
-from marl.rl.replay.reverb.adders.base import Adder
-from marl.rl.replay.reverb.adders.reverb_adder import (
+from marl.services.replay.reverb.adders.base import Adder
+from marl.services.replay.reverb.adders.reverb_adder import (
     DEFAULT_PRIORITY_TABLE,
     PriorityFn,
     PriorityFnInput,
@@ -11,4 +11,4 @@ from marl.rl.replay.reverb.adders.reverb_adder import (
     Step,
     spec_like_to_tensor_spec,
 )
-from marl.rl.replay.reverb.adders.sequence_adder import SequenceAdder
+from marl.services.replay.reverb.adders.sequence_adder import SequenceAdder

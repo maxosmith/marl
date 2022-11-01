@@ -15,7 +15,7 @@ from marl_experiments.gathering.services import model_dataset_arena, supervised_
 from marl_experiments.gathering.world_model import WorldModel
 
 from marl import bots, games, services, utils, worlds
-from marl.rl.replay.reverb import adders as reverb_adders
+from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import loggers, node_utils, spec_utils, wrappers
 
 

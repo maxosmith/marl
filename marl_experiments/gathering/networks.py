@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from marl import _types, nets, worlds
-from marl.rl.agents.impala.impala import IMPALAState
+from marl.agents.impala.impala import IMPALAState
 
 
 class CNNTimestepEncoder(hk.Module):
@@ -16,14 +16,16 @@ class CNNTimestepEncoder(hk.Module):
         self._observation_net = hk.Sequential(
             [
                 # Input: [h, w, 4].
-                hk.ConvND(num_spatial_dims=2, output_channels=4, kernel_shape=5, stride=1),
+                hk.Conv2D(32, kernel_shape=[8, 8], stride=[4, 4], padding="VALID"),
                 jax.nn.relu,
-                hk.ConvND(num_spatial_dims=2, output_channels=2, kernel_shape=5, stride=1),
+                hk.Conv2D(64, kernel_shape=[4, 4], stride=[2, 2], padding="VALID"),
+                jax.nn.relu,
+                hk.Conv2D(64, kernel_shape=[3, 3], stride=[1, 1], padding="VALID"),
                 jax.nn.relu,
                 hk.Flatten(),
             ]
         )
-        self._net = hk.nets.MLP([20, 20])
+        self._net = hk.nets.MLP([512, 512])
 
     def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> _types.Tree:
         observation = timestep.observation.astype(float)
@@ -36,7 +38,7 @@ class CNNTimestepEncoder(hk.Module):
             h = jnp.squeeze(h, axis=0)
         else:
             h = self._observation_net(observation)
-        action = jax.nn.one_hot(state.prev_action, self.num_actions)
+        action = jax.nn.one_hot(state.prev_action, self.num_actions, axis=-1)
         h = jnp.concatenate([h, action], axis=-1)
         return self._net(h)
 
@@ -110,12 +112,15 @@ class PolicyHead(hk.Module):
 
 
 class ValueHead(hk.Module):
-    def __init__(self, name: Optional[str] = "value_head"):
+    def __init__(self, num_actions: Optional[int] = None, name: Optional[str] = "value_head"):
         super().__init__(name=name)
-        self._value_head = hk.Linear(1)
+        self.num_actions = num_actions
+        self._value_head = hk.Linear(self.num_actions if self.num_actions else 1)
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
-        value = jnp.squeeze(self._value_head(inputs), axis=-1)  # [B]
+        value = self._value_head(inputs)  # [B, A].
+        if not self.num_actions:
+            value = jnp.squeeze(value, axis=-1)  # [B], when for state-values.
         return value
 
 

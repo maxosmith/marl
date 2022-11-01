@@ -10,7 +10,7 @@ import tree
 from absl.testing import absltest, parameterized
 
 from marl import _types, games
-from marl.rl.agents.impala import example_networks, impala
+from marl.agents.impala import example_networks, impala
 
 
 class ImpalaLossTest(parameterized.TestCase):

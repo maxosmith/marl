@@ -11,7 +11,7 @@ FLAGS = flags.FLAGS
 
 def main(_):
     config_path = osp.join(FLAGS.config_dir, "config.json")
-    config = experiment.IMPALAConfig(**ujson.load(open(config_path, "r")))
+    config = experiment.Config(**ujson.load(open(config_path, "r")))
     print(config)
     experiment.run(config, exist_ok=True, overwrite=False)
 

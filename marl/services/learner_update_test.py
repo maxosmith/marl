@@ -9,16 +9,16 @@ import tree
 from absl.testing import absltest
 
 from marl import games, worlds
-from marl.rl.agents.impala import example_networks
-from marl.rl.replay.reverb import adders as reverb_adders
+from marl.agents.impala import example_networks
 from marl.services import learner_update
+from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import distributed_utils, spec_utils
 
 _TABLE = "table"
 
 
 def build_computational_graphs(env_spec: worlds.EnvironmentSpec):
-    from marl.rl.agents.impala import impala
+    from marl.agents.impala import impala
 
     timestep = spec_utils.zeros_from_spec(env_spec)
 

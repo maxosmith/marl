@@ -40,9 +40,9 @@ class Config:
     num_training_arenas: int = 1
 
     # Agent configuration.
-    timestep_encoder_ctor: str = "marl_experiments.gathering.networks.CNNTimestepEncoder"
+    timestep_encoder_ctor: str = "marl_experiments.gathering.networks.MLPTimestepEncoder"
     timestep_encoder_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    memory_core_ctor: str = "marl_experiments.gathering.networks.MemoryCore"
+    memory_core_ctor: str = "marl_experiments.gathering.networks.MemoryLessCore"
     memory_core_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     policy_head_ctor: str = "marl_experiments.gathering.networks.PolicyHead"
     policy_head_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
@@ -62,8 +62,8 @@ class Config:
     # Replay options.
     replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
     replay_max_size: int = 1_000_000
-    samples_per_insert: int = 4
-    min_size_to_sample: int = 10_000
+    samples_per_insert: int = 1
+    min_size_to_sample: int = 1_000
     max_times_sampled: int = 1
     error_buffer: int = 100
     num_prefetch_threads: Optional[int] = None

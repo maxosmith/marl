@@ -10,8 +10,8 @@ import numpy as np
 from absl import logging
 
 from marl import _types, worlds
-from marl.rl.replay.reverb.adders import reverb_adder
 from marl.services import interfaces
+from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import tree_utils
 
 

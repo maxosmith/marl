@@ -4,10 +4,10 @@ import collections
 import os
 from typing import Callable, Mapping, Optional, Union
 
-import tensorflow as tf
-from marl.rl.replay.reverb import adders
-
 import reverb
+import tensorflow as tf
+
+from marl.services.replay.reverb import adders
 
 Transform = Callable[[reverb.ReplaySample], reverb.ReplaySample]
 

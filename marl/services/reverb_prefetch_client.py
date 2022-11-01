@@ -5,7 +5,7 @@ import threading
 import jax
 import reverb
 
-from marl.rl.replay.reverb import dataset
+from marl.services.replay.reverb import dataset
 from marl.utils import distributed_utils
 
 
