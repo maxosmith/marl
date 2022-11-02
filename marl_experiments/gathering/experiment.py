@@ -13,7 +13,9 @@ from absl import app, logging
 from marl_experiments.gathering import networks
 from marl_experiments.gathering.services import render_arena
 
-from marl import _types, bots, games, individuals, services, utils, worlds
+from marl import _types
+from marl import bots as bots_lib
+from marl import games, individuals, layouts, services, utils, worlds
 from marl.agents import impala
 from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
@@ -100,29 +102,29 @@ def build_game():
 @node_utils.build_courier_node
 def build_rendering_arena_node(
     config: Config,
-    policy_fn: hk.Transformed,
-    initial_state_fn: hk.Transformed,
+    policy_graph: hk.Transformed,
+    initial_state_graph: hk.Transformed,
     random_key: jax.random.PRNGKey,
-    learner_update_handle: lp.CourierHandle,
-    opponents,
-    counter_handle: lp.CourierHandle,
+    learner: lp.CourierHandle,
+    bots,
+    counter: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ):
     variable_source = services.VariableClient(
-        source=learner_update_handle,
+        source=learner,
         key=config.variable_client_key,
     )
     evaluation_policy = services.EvaluationPolicy(
-        policy_fn=policy_fn,
-        initial_state_fn=initial_state_fn,
+        policy_fn=policy_graph,
+        initial_state_fn=initial_state_graph,
         variable_source=variable_source,
         random_key=random_key,
     )
-    local_counter = services.Counter(parent=counter_handle)
+    local_counter = services.Counter(parent=counter)
 
     return render_arena.EvaluationArena(
         agents={0: evaluation_policy},
-        bots=opponents,
+        bots=bots,
         scenarios=render_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
         evaluation_frequency=config.render_frequency,
         counter=local_counter,
@@ -136,111 +138,83 @@ def run(config: Optional[Config] = None, exist_ok: bool = False, overwrite: bool
         config = Config()
     result_dir = utils.ResultDirectory(config.result_dir, exist_ok, overwrite=overwrite)
 
-    random_key = jax.random.PRNGKey(config.seed)
     game = build_game()
     env_spec = spec_utils.make_game_specs(game)[0]
 
-    opponents = {1: bots.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec)}
+    bots = {1: bots_lib.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec)}
 
     program = lp.Program(name="experiment")
 
     # TODO(maxsmith): Configurable networks and ensure that this is captured in the snapshot.
     graphs = impala.build_computational_graphs(config, env_spec)
-    train_policy_graph, loss_graph, initial_state_graph, state_spec, eval_policy_graph = graphs
     snapshot_template = services.Snapshot(
         ctor=impala.build_computational_graphs, ctor_kwargs=dict(config=config, env_spec=env_spec)
     )
 
-    with program.group("counter"):
-        counter_handle = program.add_node(impala.build_counter_node())
-
-    with program.group("reverb"):
-        reverb_handle = program.add_node(impala.build_reverb_node(config, env_spec, state_spec))
-
-    with program.group("learner_update"):
-        random_key, subkey = jax.random.split(random_key)
-        learner_update_handle = program.add_node(
-            impala.build_update_node(
-                config,
-                subkey,
-                loss_graph,
-                reverb_handle,
-                counter_handle,
-                result_dir.make_subdir(program._current_group),
-            )
+    # Build partial constructors for all of the program nodes, excluding the handles to other nodes.
+    # The handles will be provided by kwargs during program layout.
+    replay_ctor = functools.partial(
+        impala.build_reverb_node,
+        config=config,
+        env_spec=env_spec,
+        state_and_extra_spec=graphs.state_spec,
+    )
+    learner_ctor = functools.partial(impala.build_learner_node, config=config, loss_graph=graphs.loss)
+    train_arena_ctor = functools.partial(
+        impala.build_training_arena_node,
+        config=config,
+        policy_graph=graphs.policy,
+        initial_state_graph=graphs.initial_state,
+        game=game,
+        bots=bots,
+    )
+    eval_arena_ctors = []
+    eval_arena_ctors.append(
+        functools.partial(
+            impala.build_evaluation_arena_node,
+            config=config,
+            policy_graph=graphs.eval_policy,
+            initial_state_graph=graphs.initial_state,
+            bots=bots,
+            game_ctor=build_game,
         )
-
-    with program.group("training_arena"):
-        for node_i in range(config.num_training_arenas):
-            node_name = f"{program._current_group}_{node_i}"
-            random_key, subkey = jax.random.split(random_key)
-
-            program.add_node(
-                impala.build_training_arena_node(
-                    config,
-                    subkey,
-                    train_policy_graph,
-                    initial_state_graph,
-                    reverb_handle,
-                    learner_update_handle,
-                    counter_handle,
-                    game,
-                    opponents,
-                    result_dir.make_subdir(node_name),
-                )
-            )
-
-    with program.group("evaluation_arena"):
-        # Policy evaluation.
-        random_key, subkey = jax.random.split(random_key)
-        evaluation_node = impala.build_evaluation_arena_node(
-            config,
-            train_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            build_game,
-            result_dir.make_subdir(program._current_group),
+    )
+    eval_arena_ctors.append(
+        functools.partial(
+            build_rendering_arena_node,
+            config=config,
+            policy_graph=graphs.policy,
+            initial_state_graph=graphs.initial_state,
+            bots=bots,
         )
-
-        # Training rendering.
-        train_name = f"{program._current_group}_render_train"
-        random_key, subkey = jax.random.split(random_key)
-        train_render_node = build_rendering_arena_node(
-            config,
-            train_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            result_dir.make_subdir(train_name),
+    )
+    eval_arena_ctors.append(
+        functools.partial(
+            build_rendering_arena_node,
+            config=config,
+            policy_graph=graphs.eval_policy,
+            initial_state_graph=graphs.initial_state,
+            bots=bots,
         )
+    )
 
-        # Evaluation rendering.
-        eval_name = f"{program._current_group}_render_eval"
-        random_key, subkey = jax.random.split(random_key)
-        eval_render_node = build_rendering_arena_node(
-            config,
-            eval_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            result_dir.make_subdir(eval_name),
-        )
+    program = layouts.build_distributed_training_program(
+        program=program,
+        counter_ctor=impala.build_counter_node,
+        replay_ctor=replay_ctor,
+        learner_ctor=learner_ctor,
+        train_arena_ctor=train_arena_ctor,
+        eval_arena_ctors=eval_arena_ctors,
+        result_dir=result_dir,
+        seed=config.seed,
+    )
 
-        program.add_node(lp.MultiThreadingColocation([evaluation_node, train_render_node, eval_render_node]))
-
-    with program.group("saver"):
-        program.add_node(
-            impala.build_snapshot_node(
-                snapshot_template, learner_update_handle, result_dir.make_subdir(program._current_group)
-            )
-        )
+    # with program.group("saver"):
+    #     program.add_node(
+    #         impala.build_snapshot_node(
+    #             snapshot_template, learner_update_handle, result_dir.make_subdir(program._current_group)
+    #         )
+    #     )
 
     lp.launch(
         program,

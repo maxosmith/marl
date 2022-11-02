@@ -75,16 +75,18 @@ def build_computational_graphs(config, env_spec: worlds.EnvironmentSpec):
     initial_state = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[2])
     state_spec = hk.without_apply_rng(hk_graphs).apply[3](None)  # No parameters.
     eval_policy = hk.Transformed(init=hk_graphs.init, apply=hk_graphs.apply[4])
-    return train_policy, loss, initial_state, state_spec, eval_policy
+    return IMPALAGraphs(
+        policy=train_policy, loss=loss, initial_state=initial_state, state_spec=state_spec, eval_policy=eval_policy
+    )
 
 
-def build_reverb_node(config, env_spec: worlds.EnvironmentSpec, state_spec: worlds.TreeSpec):
+def build_reverb_node(config, env_spec: worlds.EnvironmentSpec, state_and_extra_spec: worlds.TreeSpec):
     def _build_reverb_node(
         env_spec: worlds.EnvironmentSpec, sequence_length: int, table_name: str
     ) -> List[reverb.Table]:
         signature = reverb_adders.SequenceAdder.signature(
             env_spec,
-            state_spec,
+            state_and_extra_spec,
             sequence_length=sequence_length,
         )
         rate_limiter = reverb.rate_limiters.SampleToInsertRatio(
@@ -113,12 +115,12 @@ def build_reverb_node(config, env_spec: worlds.EnvironmentSpec, state_spec: worl
 
 
 @node_utils.build_courier_node
-def build_update_node(
+def build_learner_node(
     config,
     random_key: jax.random.PRNGKey,
     loss_graph: hk.Transformed,
-    reverb_handle: lp.CourierHandle,
-    counter_handle: lp.CourierHandle,
+    replay: lp.CourierHandle,
+    counter: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ):
     logger = loggers.LoggerManager(
@@ -128,7 +130,7 @@ def build_update_node(
         ],
         time_frequency=5,  # Seconds.
     )
-    local_counter = services.Counter(parent=counter_handle)
+    local_counter = services.Counter(parent=counter)
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(config.max_gradient_norm),
@@ -136,7 +138,7 @@ def build_update_node(
     )
 
     data_iterator = services.ReverbPrefetchClient(
-        reverb_client=reverb_handle,
+        reverb_client=replay,
         table_name=config.replay_table_name,
         batch_size=config.batch_size,
     )
@@ -158,11 +160,11 @@ def build_training_arena_node(
     random_key: jax.random.PRNGKey,
     policy_graph: hk.Transformed,
     initial_state_graph: hk.Transformed,
-    reverb_handle: lp.CourierHandle,
-    learner_update_handle: lp.CourierHandle,
-    counter_handle: lp.CourierHandle,
+    replay: lp.CourierHandle,
+    learner: lp.CourierHandle,
+    counter: lp.CourierHandle,
     game: worlds.Game,
-    players,
+    bots,
     result_dir: utils.ResultDirectory,
 ):
     # NOTE: Currently LaunchPad does not support RPC methods receiving np.Arrays.
@@ -173,7 +175,7 @@ def build_training_arena_node(
     # only and is ignored otherwise. So we need to make sure that sequences
     # overlap on one transition, thus "-1" in the period length computation.
     reverb_adder = reverb_adders.SequenceAdder(
-        client=reverb_handle,
+        client=replay,
         priority_fns={config.replay_table_name: None},
         period=config.sequence_period or (config.sequence_length - 1),
         sequence_length=config.sequence_length,
@@ -181,7 +183,7 @@ def build_training_arena_node(
     # Variable client is responsible for syncing with the Updating node, but does not tell
     # that node when it should update.
     variable_source = services.VariableClient(
-        source=learner_update_handle,
+        source=learner,
         key=config.variable_client_key,
         update_period=config.variable_update_period,
     )
@@ -193,8 +195,10 @@ def build_training_arena_node(
         random_key=random_key,
         backend="cpu",
     )
-    local_counter = services.Counter(parent=counter_handle)
+    local_counter = services.Counter(parent=counter)
 
+    # TODO(maxsmith): Currently this assumes the learner is always player 0, generalize.
+    players = bots
     players[0] = policy
 
     logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
@@ -211,31 +215,31 @@ def build_training_arena_node(
 @node_utils.build_courier_node
 def build_evaluation_arena_node(
     config,
-    policy_fn: hk.Transformed,
-    initial_state_fn: hk.Transformed,
+    policy_graph: hk.Transformed,
+    initial_state_graph: hk.Transformed,
     random_key: jax.random.PRNGKey,
-    learner_update_handle: lp.CourierHandle,
-    opponents,
-    counter_handle: lp.CourierHandle,
+    learner: lp.CourierHandle,
+    bots,
+    counter: lp.CourierHandle,
     game_ctor,
     result_dir: utils.ResultDirectory,
 ):
     variable_source = services.VariableClient(
-        source=learner_update_handle,
+        source=learner,
         key=config.variable_client_key,
     )
     evaluation_policy = services.EvaluationPolicy(
-        policy_fn=policy_fn,
-        initial_state_fn=initial_state_fn,
+        policy_fn=policy_graph,
+        initial_state_fn=initial_state_graph,
         variable_source=variable_source,
         random_key=random_key,
     )
     logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
-    local_counter = services.Counter(parent=counter_handle)
+    local_counter = services.Counter(parent=counter)
 
     return arenas.EvaluationArena(
         agents={0: evaluation_policy},
-        bots=opponents,
+        bots=bots,
         scenarios=arenas.evaluation_arena.EvaluationScenario(game_ctor=game_ctor, num_episodes=5),
         evaluation_frequency=config.render_frequency,
         counter=local_counter,
