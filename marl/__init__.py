@@ -1,34 +1,9 @@
 # pylint: disable=unused-import
 
-from marl._types import (
-    PlayerID,
-    Individual,
-    Array,
-    Tree,
-    Observation,
-    Action,
-    PlayerIDToAction,
-    Params,
-    NetworkOutput,
-    QValues,
-    Logits,
-    LogProb,
-    Value,
-)
-
-from marl.worlds import (
-    ArraySpec,
-    BoundedArraySpec,
-    DiscreteArraySpec,
-    TreeSpec,
-    TreeTFSpec,
-    Environment,
-    EnvironmentSpec,
-    GameSpec,
-    PlayerIDToSpec,
-    PlayerIDToEnvSpec,
-    TimeStep,
-    StepType,
-    PlayerIDToTimestep,
-    Game,
-)
+from marl._types import (Action, Array, Individual, Logits, LogProb,
+                         NetworkOutput, Observation, Params, PlayerID,
+                         PlayerIDToAction, QValues, Tree, Value)
+from marl.worlds import (ArraySpec, BoundedArraySpec, DiscreteArraySpec,
+                         Environment, EnvironmentSpec, Game, GameSpec,
+                         PlayerIDToEnvSpec, PlayerIDToSpec, PlayerIDToTimestep,
+                         StepType, TimeStep, TreeSpec, TreeTFSpec)

@@ -7,13 +7,13 @@ import optax
 import reverb
 import tree
 from absl import app
-from marl_experiments.gathering import networks
 
 from marl import games, services
 from marl.agents.impala import impala
 from marl.services.replay.reverb import adders
 from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import wrappers
+from marl_experiments.gathering import networks
 
 
 def main(_):

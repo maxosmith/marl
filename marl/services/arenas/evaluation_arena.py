@@ -2,7 +2,8 @@
 import dataclasses
 import operator
 import time
-from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence, Union
+from typing import (Any, Callable, Mapping, NamedTuple, Optional, Sequence,
+                    Union)
 
 import numpy as np
 import tree

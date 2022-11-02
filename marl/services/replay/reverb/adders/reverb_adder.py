@@ -4,16 +4,8 @@ import abc
 import time
 from os import times
 from symbol import namedexpr_test
-from typing import (
-    Callable,
-    Iterable,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sized,
-    Tuple,
-    Union,
-)
+from typing import (Callable, Iterable, Mapping, NamedTuple, Optional, Sized,
+                    Tuple, Union)
 
 import dm_env
 import numpy as np

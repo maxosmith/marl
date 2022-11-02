@@ -17,7 +17,8 @@ from marl.agents import impala
 from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
 from marl.services.replay.reverb import adders as reverb_adders
-from marl.utils import import_utils, loggers, node_utils, signals, spec_utils, wrappers
+from marl.utils import (import_utils, loggers, node_utils, signals, spec_utils,
+                        wrappers)
 
 
 @dataclasses.dataclass

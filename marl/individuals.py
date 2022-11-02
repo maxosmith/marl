@@ -1,5 +1,4 @@
 import abc
-
 from typing import Tuple
 
 from marl import _types, worlds

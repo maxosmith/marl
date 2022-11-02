@@ -7,8 +7,8 @@ from absl import app
 from launchpad import context
 
 from marl import worlds
-from marl.services import arenas
 from marl.rl.replay.reverb import adders
+from marl.services import arenas
 from marl.utils import mocks, signals, spec_utils
 
 

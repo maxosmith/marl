@@ -4,10 +4,10 @@ import subprocess
 
 import ujson
 from absl import app, flags, logging
-from marl_experiments.gathering import experiment
 
 from marl import utils
 from marl.utils import hyper
+from marl_experiments.gathering import experiment
 
 flags.DEFINE_string("result_dir", "/scratch/wellman_root/wellman1/mxsmith/tests/impala_sweep2", "")
 FLAGS = flags.FLAGS

@@ -5,9 +5,9 @@ import tempfile
 
 import ujson
 from absl import app
-from marl_experiments.tests.hparam_sweeps import sweep_test
 
 from marl.utils import hyper
+from marl_experiments.tests.hparam_sweeps import sweep_test
 
 
 def main(_):

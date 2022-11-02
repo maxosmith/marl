@@ -12,8 +12,8 @@ import launchpad as lp
 
 from marl import utils
 
-_CourierCtor = Callable[[], lp.CourierNode]
-_ReverbCtor = Callable[[], lp.ReverbNode]
+_CourierCtor = Callable[..., lp.CourierNode]
+_ReverbCtor = Callable[..., lp.ReverbNode]
 
 
 def build_distributed_training_program(

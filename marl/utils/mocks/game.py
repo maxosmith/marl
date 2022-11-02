@@ -6,8 +6,6 @@ from marl import _types, worlds
 from marl.utils import spec_utils
 from marl.utils.mocks import environment as mock_envs
 
-from marl import worlds
-
 
 class Game(worlds.Game):
     """A mock game that generates placeholder values according to a prespecified spec."""

@@ -20,9 +20,8 @@ from unittest import mock
 import numpy as np
 import reverb
 from absl.testing import absltest
-from launchpad.launch.test_multi_threading import (
-    address_builder as test_address_builder,
-)
+from launchpad.launch.test_multi_threading import \
+    address_builder as test_address_builder
 from launchpad.nodes.reverb import node as reverb_node
 from reverb import rate_limiters
 

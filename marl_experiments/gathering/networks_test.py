@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from absl.testing import absltest, parameterized
+
 from marl_experiments.gathering import networks
 
 

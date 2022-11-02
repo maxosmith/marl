@@ -1,9 +1,9 @@
 import jax
 from absl.testing import absltest, parameterized
-from marl_experiments.gathering import experiment
 
 from marl import games
 from marl.utils import spec_utils
+from marl_experiments.gathering import experiment
 
 
 class ExperimentTest(parameterized.TestCase):

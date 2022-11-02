@@ -5,10 +5,9 @@ types that require importing structures from within this package.
 The package API (`__init__`) should import all of these types and
 newly defined types into a single interface.
 """
-from typing import Any, NamedTuple, Mapping
+from typing import Any, Mapping, NamedTuple
 
 import chex
-
 
 PlayerID = int
 # TODO(maxsmith): Move individual into an interface.

@@ -6,13 +6,14 @@ and `TimeStep` objects.
 
 https://github.com/deepmind/dm_env/blob/master/dm_env/_environment.py
 """
-import enum
-from typing import NamedTuple, Any, Mapping, Iterable, Union
-import tensorflow as tf
-
 import abc
-from marl import _types
+import enum
+from typing import Any, Iterable, Mapping, NamedTuple, Union
+
+import tensorflow as tf
 from dm_env import specs as dm_env_specs
+
+from marl import _types
 
 ArraySpec = dm_env_specs.Array
 BoundedArraySpec = dm_env_specs.BoundedArray

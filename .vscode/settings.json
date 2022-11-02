@@ -19,7 +19,7 @@
     "python.sortImports.args": [
         "--profile=black",
         "--project=marl",
-        "--thirdparty=reverb",
+        "--project=marl_experiments",
     ],
     "[python]": {
         "editor.codeActionsOnSave": {

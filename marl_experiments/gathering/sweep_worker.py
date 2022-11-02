@@ -3,6 +3,7 @@ import os.path as osp
 
 import ujson
 from absl import app, flags
+
 from marl_experiments.gathering import experiment
 
 flags.DEFINE_string("config_dir", "", "")

@@ -4,11 +4,9 @@ import itertools
 from typing import List, Optional, Sequence
 
 from marl import _types
-from marl.services.interfaces import (
-    saveable_interface,
-    variable_source_interface,
-    worker_interface,
-)
+from marl.services.interfaces import (saveable_interface,
+                                      variable_source_interface,
+                                      worker_interface)
 from marl.utils import distributed_utils
 
 

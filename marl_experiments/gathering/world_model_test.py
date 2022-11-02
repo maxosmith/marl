@@ -1,6 +1,7 @@
 import haiku as hk
 import numpy as np
 from absl.testing import absltest, parameterized
+
 from marl_experiments.gathering import networks, world_model
 
 

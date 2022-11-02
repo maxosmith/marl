@@ -10,8 +10,6 @@ import numpy as np
 import optax
 import reverb
 from absl import app, logging
-from marl_experiments.gathering import networks
-from marl_experiments.gathering.services import render_arena
 
 from marl import _types, bots, games, individuals, services, utils, worlds
 from marl.agents.dqn import dqn
@@ -19,6 +17,8 @@ from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
 from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import loggers, node_utils, signals, spec_utils, wrappers
+from marl_experiments.gathering import networks
+from marl_experiments.gathering.services import render_arena
 
 
 @dataclasses.dataclass

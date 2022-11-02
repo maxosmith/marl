@@ -11,7 +11,8 @@ from absl import logging
 from marl import _types, individuals, utils, worlds
 from marl.services import counter as counter_lib
 from marl.services.arenas import base
-from marl.utils import dict_utils, loggers, signals, spec_utils, time_utils, tree_utils
+from marl.utils import (dict_utils, loggers, signals, spec_utils, time_utils,
+                        tree_utils)
 from marl.utils.loggers.base import LogData
 
 

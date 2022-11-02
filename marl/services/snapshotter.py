@@ -11,7 +11,8 @@ import tree
 from absl import logging
 
 from marl import _types
-from marl.services.interfaces import variable_source_interface, worker_interface
+from marl.services.interfaces import (variable_source_interface,
+                                      worker_interface)
 from marl.utils import file_utils, signals
 
 _ARRAY_NAME = "array_nest"
