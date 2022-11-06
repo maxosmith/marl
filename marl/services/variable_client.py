@@ -13,6 +13,8 @@ from marl.services.interfaces import variable_source_interface
 
 
 class VariableReference(NamedTuple):
+    """Reference to a variable contained in the source."""
+
     variable_name: str
 
 
@@ -28,6 +30,7 @@ class ReferenceVariableSource(variable_source_interface.VariableSourceInterface)
     """
 
     def get_variables(self, names: Sequence[str]) -> List[VariableReference]:
+        """Get referneces for all variables."""
         return [VariableReference(name) for name in names]
 
 
@@ -37,7 +40,7 @@ class VariableClient:
     def __init__(
         self,
         source: variable_source_interface.VariableSourceInterface,
-        key: Union[str, Sequence[str]],
+        key: Optional[Union[str, Sequence[str]]] = None,
         update_period: Union[int, datetime.timedelta] = 1,
         device: Optional[Union[str, jax.xla.Device]] = None,
     ):
@@ -46,7 +49,8 @@ class VariableClient:
         Args:
             client: A variable source from which we fetch variables.
             key: Which variables to request. When multiple keys are used, params
-                property will return a list of params.
+                property will return a list of params. If None, assumes that the
+                client has a singular variable set that can be retrieved.
             update_period: Interval between fetches, specified as either (int) a
                 number of calls to update() between actual fetches or (timedelta) a time
                 interval that has to pass since the last fetch.
@@ -121,6 +125,7 @@ class VariableClient:
         self._callback(self._request())
 
     def _callback(self, params_list: List[_types.Params]):
+        """Place the parameters on the appropriate device when ready."""
         logging.info(f"Synchronizing parameters: {self._key}.")
         if self._device and not isinstance(self._source, ReferenceVariableSource):
             # Move variables to a proper device.
@@ -130,6 +135,7 @@ class VariableClient:
 
     @property
     def device(self) -> Optional[jax.xla.Device]:
+        """Device that variables are placed onto."""
         return self._device
 
     @property

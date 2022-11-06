@@ -7,7 +7,6 @@ References:
 from typing import Callable, Optional, Sequence, Union
 
 import haiku as hk
-import jax
 import launchpad as lp
 
 from marl import utils
@@ -75,6 +74,7 @@ def build_distributed_training_program(
                 train_arena_ctor(
                     learner=learner_handle,
                     counter=counter_handle,
+                    replay=replay_handle,
                     random_key=next(key_sequence),
                     result_dir=result_dir.make_subdir(f"{program._current_group}_{i}"),
                 )

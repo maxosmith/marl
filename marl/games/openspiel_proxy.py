@@ -1,3 +1,4 @@
+"""Proxy for OpenSpiel games."""
 from typing import Union
 
 import numpy as np
@@ -15,11 +16,12 @@ _SERIALIZED_STATE = "serialized_state"
 class OpenSpielProxy(worlds.Game):
     """Proxy to an OpenSpiel game instance."""
 
-    def __init__(self, game: Union[str, pyspiel.Game], **kwargs):
+    def __init__(self, game: Union[str, pyspiel.Game], include_full_state: bool = False, **kwargs):
         """Initializes an `OpenSpielProxy`.
 
         Args:
             game: PySpiel game or a string representation of a game.
+            include_full_state: Include the serialized state in the observation.
             **kwargs: Additional settings passed to the OpenSpiel game.
         """
         if isinstance(game, pyspiel.Game):
@@ -32,7 +34,7 @@ class OpenSpielProxy(worlds.Game):
         else:
             logging.info("Proxy built using game string: %s", game)
             self._game = pyspiel.load_game(game)
-        self._game = rl_environment.Environment(self._game)
+        self._game = rl_environment.Environment(self._game, include_full_state=include_full_state)
 
         self._num_players = self._game.num_players
 

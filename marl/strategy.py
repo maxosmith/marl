@@ -1,3 +1,4 @@
+"""Strategy objects defining containers of policies and a distribution over them."""
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
@@ -22,16 +23,18 @@ class Strategy(individuals.Bot):
         if np.any(np.asarray(self._mixture) < 0):
             raise ValueError("Mixture must be a valid probability distribution.")
 
-    def step(self, timestep: worlds.TimeStep, state: Optional[_types.Tree] = None) -> Tuple[_types.Tree, _types.State]:
+    def step(
+        self, timestep: worlds.TimeStep, state: Optional[_types.Tree] = None, **kwargs
+    ) -> Tuple[_types.Tree, _types.State]:
         """Selects an action to take given the current timestep."""
         assert self._policy, "Episode-reset must be called before step."
-        return self._policy.step(timestep, state)
+        return self._policy.step(timestep, state, **kwargs)
 
-    def episode_reset(self, timestep: worlds.TimeStep):
+    def episode_reset(self, timestep: worlds.TimeStep, **kwargs):
         """Reset the state of the agent at the start of an epsiode.."""
         policy_index = self._rng.choice(len(self._policies), p=self._mixture)
         self.set_policy(policy_index)
-        return None
+        return self._policy.episode_reset(timestep, **kwargs)
 
     def set_policy(self, policy_id: int):
         """Set the policy for the next episode."""
