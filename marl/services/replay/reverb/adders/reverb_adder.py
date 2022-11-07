@@ -2,10 +2,7 @@
 
 import abc
 import time
-from os import times
-from symbol import namedexpr_test
-from typing import (Callable, Iterable, Mapping, NamedTuple, Optional, Sized,
-                    Tuple, Union)
+from typing import Callable, Iterable, Mapping, NamedTuple, Optional, Sized, Tuple, Union
 
 import dm_env
 import numpy as np
@@ -48,6 +45,7 @@ PriorityFnMapping = Mapping[str, Optional[PriorityFn]]
 
 
 def spec_like_to_tensor_spec(paths: Iterable[str], spec: worlds.ArraySpec):
+    """Convert a spec into a TF spec."""
     return tf.TensorSpec.from_spec(spec, name="/".join(str(p) for p in paths))
 
 
@@ -103,6 +101,7 @@ class ReverbAdder(base.Adder):
         self._validate_items = validate_items
 
     def __del__(self):
+        """Delete an instance of `ReverbAdder`."""
         if self.__writer is not None:
             timeout_ms = 10_000
             # Try flush all appended data before closing to avoid loss of experience.
@@ -119,6 +118,7 @@ class ReverbAdder(base.Adder):
 
     @property
     def _writer(self) -> reverb.TrajectoryWriter:
+        """Get the underlying trajectory writer."""
         if self.__writer is None:
             self.__writer = self._client.trajectory_writer(
                 num_keep_alive_refs=self._max_sequence_length, validate_items=self._validate_items
@@ -127,6 +127,7 @@ class ReverbAdder(base.Adder):
         return self.__writer
 
     def add_priority_table(self, table_name: str, priority_fn: Optional[PriorityFn]):
+        """Add a priority function for sampling from a table."""
         if table_name in self._priority_fns:
             raise ValueError(
                 f"A priority function already exists for {table_name}. "
@@ -150,6 +151,7 @@ class ReverbAdder(base.Adder):
         if not timestep.first():
             # Complete the remaining row's information that was started during the previous timestep.
             self._writer.append(dict(reward=timestep.reward))
+            self._write()
 
         has_extras = len(extras) > 0 if isinstance(extras, Sized) else extras is not None
         current_step = dict(
@@ -164,7 +166,6 @@ class ReverbAdder(base.Adder):
             # Start a new row based on the current observation. We write a partial row, because we are
             # awaiting the reward that is received for the action.
             self._writer.append(current_step, partial_step=True)
-            self._write()
 
         elif timestep.last():
             # Place the final row which only contains the last observation for bootstrapping.
@@ -174,6 +175,7 @@ class ReverbAdder(base.Adder):
             dummy_step["start_of_episode"] = timestep.first()
             dummy_step["end_of_episode"] = timestep.last()
             dummy_step["reward"] = tree.map_structure(np.zeros_like, timestep.reward)
+
             self._writer.append(dummy_step)
             self._write_last()
             self.reset()

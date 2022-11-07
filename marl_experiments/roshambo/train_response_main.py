@@ -1,7 +1,7 @@
 """Train a best-response to the Roshambo bot(s)."""
 from typing import Optional
 
-import jax
+import haiku as hk
 import launchpad as lp
 import numpy as np
 from absl import app
@@ -57,9 +57,9 @@ def get_config() -> config_dict.ConfigDict:
                     replay_table_name=replay_table_name,
                     sequence_length=sequence_length,
                     samples_per_insert=1.0,
-                    min_size_to_sample=1_000,
+                    min_size_to_sample=1,
                     max_times_sampled=1,
-                    error_buffer=2,
+                    error_buffer=100,
                     replay_max_size=1_000_000,
                 )
             ),
@@ -72,6 +72,7 @@ def get_config() -> config_dict.ConfigDict:
                     sequence_period=None,
                 )
             ),
+            num_train_arenas=1,
             evaluation_frequency=10_000,
         )
     )
@@ -80,7 +81,10 @@ def get_config() -> config_dict.ConfigDict:
 
 def build_game() -> worlds.Game:
     """Builds an instance of repeated RPS."""
-    game = openspiel_proxy.OpenSpielProxy("repeated_game(stage_game=matrix_rps(),num_repetitions=1000)")
+    game = openspiel_proxy.OpenSpielProxy(
+        "repeated_game(stage_game=matrix_rps(),num_repetitions=1000)",
+        include_full_state=True,
+    )
     return game
 
 
@@ -89,56 +93,76 @@ def run(config: Optional[config_dict.ConfigDict] = None):
     if config is None:
         config = get_config()
     result_dir = utils.ResultDirectory(config.result_dir, overwrite=True, exist_ok=True)
-    random_key = jax.random.PRNGKey(config.seed)
+    key_sequence = hk.PRNGSequence(config.seed)
 
     game = rps_utils.build_game()
     env_spec = game.spec()[0]
 
     bots = {1: roshambo_bot.RoshamboBot(name="rotatebot")}
 
-    _ = lp.Program(name="train_response")
+    program = lp.Program(name="train_response")
 
     graphs = builders.build_impala_graphs(config.impala, env_spec)
 
-    counter = builders.build_counter_node()
+    with program.group("counter"):
+        counter = program.add_node(builders.build_counter_node())
 
-    replay = builders.build_reverb_node(env_spec=env_spec, state_and_extra_spec=graphs.state_spec, **config.replay)
+    with program.group("replay"):
+        replay = program.add_node(
+            builders.build_reverb_node(
+                env_spec=env_spec,
+                state_and_extra_spec=graphs.state_spec,
+                **config.replay,
+            )
+        )
 
-    random_key, subkey = jax.random.split(random_key)
-    learner = builders.build_learner_node(
-        loss_graph=graphs.loss,
-        replay=replay,
-        counter=counter,
-        random_key=subkey,
-        result_dir=result_dir.make_subdir("learner"),
-        **config.learner,
-    )
+    with program.group("learner"):
+        learner = program.add_node(
+            builders.build_learner_node(
+                loss_graph=graphs.loss,
+                replay=replay,
+                counter=counter,
+                random_key=next(key_sequence),
+                result_dir=result_dir.make_subdir(program._current_group),
+                **config.learner,
+            )
+        )
 
-    random_key, subkey = jax.random.split(random_key)
-    _ = builders.build_training_arena_node(
-        policy_graph=graphs.policy,
-        initial_state_graph=graphs.initial_state,
-        replay=replay,
-        learner=learner,
-        game=game,
-        bots=bots,
-        counter=counter,
-        random_key=subkey,
-        result_dir=result_dir.make_subdir("train_arena"),
-        **config.training_arena,
-    )
+    with program.group("train_arena"):
+        for i in range(config.num_train_arenas):
+            node_name = f"{program._current_group}_{i}"
+            _ = program.add_node(
+                builders.build_training_arena_node(
+                    policy_graph=graphs.policy,
+                    initial_state_graph=graphs.initial_state,
+                    replay=replay,
+                    learner=learner,
+                    game=game,
+                    bots=bots,
+                    counter=counter,
+                    random_key=next(key_sequence),
+                    result_dir=result_dir.make_subdir(node_name),
+                    **config.training_arena,
+                )
+            )
 
-    _ = builders.build_evaluation_arena_node(
-        policy_graph=graphs.eval_policy,
-        initial_state_graph=graphs.initial_state,
-        game_ctor=build_game,
-        learner=learner,
-        bots=bots,
-        counter=counter,
-        random_key=subkey,
-        result_dir=result_dir.make_subdir("eval_arena"),
-        evaluation_frequency=config.evaluation_frequency,
-    )
+    with program.group("eval_arena"):
+        _ = program.add_node(
+            builders.build_evaluation_arena_node(
+                policy_graph=graphs.eval_policy,
+                initial_state_graph=graphs.initial_state,
+                game_ctor=build_game,
+                learner=learner,
+                bots=bots,
+                counter=counter,
+                random_key=next(key_sequence),
+                result_dir=result_dir.make_subdir(program._current_group),
+                evaluation_frequency=config.evaluation_frequency,
+                step_key=config.learner.step_key,
+            )
+        )
+
+    lp.launch(program, launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING, terminal="current_terminal")
 
 
 def main(_):

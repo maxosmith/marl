@@ -1,3 +1,4 @@
+"""A learning agent's policy."""
 from typing import Optional
 
 import haiku as hk
@@ -11,10 +12,7 @@ from marl.utils import tree_utils
 
 
 class LearnerPolicy:
-    """Service providing a learner's policy/step function.
-
-    TODO(maxsmith): Ensure that this is thread-safe.
-    """
+    """Service providing a learner's policy/step function."""
 
     def __init__(
         self,
@@ -43,19 +41,19 @@ class LearnerPolicy:
         self._initial_state_fn = jax.jit(initial_state_fn.apply, backend=backend)
 
     def step(self, timestep: worlds.TimeStep, state: Optional[_types.Tree] = None):
+        """Policy step."""
         self._random_key, subkey = jax.random.split(self._random_key)
         action, new_state = self._policy_fn(self._variable_source.params, subkey, timestep, state)
         action = tree_utils.to_numpy(action)
-
         if self._reverb_adder:
             self._reverb_adder.add(timestep=timestep, action=action, extras=new_state)
-
         if not self._per_episode_update:
             # Maybe update variables with the latest copy from the updater.
             self._variable_source.update(wait=False)
         return action, new_state
 
     def episode_reset(self, timestep: worlds.TimeStep):
+        """Reset the agent's state for a new episode."""
         self._random_key, subkey = jax.random.split(self._random_key)
         state = self._initial_state_fn(None, subkey, batch_size=None)
         # Start a new episode in the replay buffer.

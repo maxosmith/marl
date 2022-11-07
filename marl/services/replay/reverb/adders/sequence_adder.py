@@ -156,9 +156,11 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         super().reset()
 
     def _write(self):
+        """Maybe write an item to reverb."""
         self._maybe_create_item(self._sequence_length)
 
     def _write_last(self):
+        """Write an item to reverb containing the end of an episode."""
         # Maybe determine the delta to the next time we would write a sequence.
         if self._end_of_episode_behavior in (EndBehavior.TRUNCATE, EndBehavior.ZERO_PAD):
             delta = self._sequence_length - self._writer.episode_steps
@@ -190,6 +192,7 @@ class SequenceAdder(reverb_adder.ReverbAdder):
             )
 
     def _maybe_create_item(self, sequence_length: int, *, end_of_episode: bool = False, force: bool = False):
+        """Maybe create an item in reverb."""
         # Check conditions under which a new item is created.
         first_write = self._writer.episode_steps == sequence_length
         # NOTE(bshahr): the following line assumes that the only way sequence_length
@@ -202,11 +205,12 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         if not first_write and not period_reached and not force:
             return
 
-        # TODO(b/183945808): will need to change to adhere to the new protocol.
-        if not end_of_episode:
-            get_traj = operator.itemgetter(slice(-sequence_length - 1, -1))
-        else:
-            get_traj = operator.itemgetter(slice(-sequence_length, None))
+        # if not end_of_episode:
+        #     get_traj = operator.itemgetter(slice(-sequence_length - 1, -1))
+        # else:
+        # TODO(maxsmith): VERIFY. This previously assumed partial rows upon writing,
+        # which we shouldn't have at this point anymore.
+        get_traj = operator.itemgetter(slice(-sequence_length, None))
 
         history = self._writer.history
         trajectory = reverb_adder.Step(**tree.map_structure(get_traj, history))
@@ -249,6 +253,7 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         """
 
         def add_time_dim(paths, spec):
+            """Adds a time dimension to a spec."""
             return tf.TensorSpec(
                 shape=(sequence_length, *spec.shape), dtype=spec.dtype, name="/".join(str(p) for p in paths)
             )

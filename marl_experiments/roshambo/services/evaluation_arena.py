@@ -9,6 +9,7 @@ import tree
 from absl import logging
 
 from marl import _types, services, worlds
+from marl.games import openspiel_proxy
 from marl.services import counter as counter_lib
 from marl.services.arenas import base
 from marl.utils import dict_utils, loggers, signals, spec_utils, tree_utils
@@ -83,14 +84,26 @@ class EvaluationArena(base.ArenaInterface):
         episode_return = spec_utils.zeros_from_spec(game.reward_specs())
 
         timesteps = game.reset()
-        player_states = {
-            id: player.episode_reset(timestep=timesteps[id], player_id=id) for id, player in players.items()
-        }
+        player_states = {}
+        for id, player in players.items():
+            # Agent cannot process string-types (serialized state).
+            if isinstance(player, (services.LearnerPolicy, services.EvaluationPolicy)):
+                if openspiel_proxy.SERIALIZED_STATE in timesteps[id].observation:
+                    del timesteps[id].observation[openspiel_proxy.SERIALIZED_STATE]
+                player_states[id] = player.episode_reset(timestep=timesteps[id])
+            else:
+                player_states[id] = player.episode_reset(timestep=timesteps[id], player_id=id)
 
         while not np.any([ts.last() for ts in timesteps.values()]):
             actions = {}
             for id, player in players.items():
-                actions[id], player_states[id] = player.step(timesteps[id], player_states[id])
+                # Agent cannot process string-types (serialized state).
+                if isinstance(player, (services.LearnerPolicy, services.EvaluationPolicy)):
+                    if openspiel_proxy.SERIALIZED_STATE in timesteps[id].observation:
+                        del timesteps[id].observation[openspiel_proxy.SERIALIZED_STATE]
+                    actions[id], player_states[id] = player.step(timesteps[id], player_states[id])
+                else:
+                    actions[id], player_states[id] = player.step(timesteps[id], player_states[id])
 
             timesteps = game.step(actions)
 

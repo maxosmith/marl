@@ -1,3 +1,4 @@
+"""Test suite for `marl.games.openspiel_proxy`. """
 import numpy as np
 import pyspiel
 from absl.testing import absltest, parameterized
@@ -38,8 +39,8 @@ class OpenSpielProxyRPSTest(parameterized.TestCase):
         obs_specs = game.observation_specs()
         self.assertLen(obs_specs, 2)
         for player_id in range(2):
-            self.assertEqual((6,), obs_specs[player_id].shape)
-            self.assertEqual(np.float32, obs_specs[player_id].dtype)
+            self.assertEqual((6,), obs_specs[player_id]["info_state"].shape)
+            self.assertEqual(np.float32, obs_specs[player_id]["info_state"].dtype)
 
         # Action.
         action_specs = game.action_specs()

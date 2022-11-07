@@ -12,6 +12,7 @@ from marl import services, utils, worlds
 from marl.agents import impala
 from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import import_utils, loggers, node_utils, spec_utils
+from marl.utils.loggers import terminal as terminal_logger_lib
 from marl_experiments.roshambo.services import evaluation_arena, training_arena
 
 
@@ -85,9 +86,14 @@ def build_learner_node(
     max_gradient_norm: float,
     batch_size: int,
 ):
+    # Print (key, values) to unique lines to account for non-scalar values.
+    def format_fn(x):
+        """Prints metrics on new lines regardless of type."""
+        return terminal_logger_lib.data_to_string(x, "\n")
+
     logger = loggers.LoggerManager(
         loggers=[
-            loggers.TerminalLogger(time_frequency=5),
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=format_fn),
             loggers.TensorboardLogger(result_dir.dir, step_key=step_key),
         ],
         time_frequency=5,  # Seconds.
@@ -116,7 +122,7 @@ def build_learner_node(
     )
 
 
-@node_utils.build_courier_node(disable_run=True)
+@node_utils.build_courier_node(disable_run=False)
 def build_training_arena_node(
     policy_graph: hk.Transformed,
     initial_state_graph: hk.Transformed,
@@ -191,14 +197,10 @@ def build_evaluation_arena_node(
     counter: lp.CourierHandle,
     game_ctor,
     evaluation_frequency: int,
-    variable_client_key: str,
     step_key: str,
     result_dir: utils.ResultDirectory,
 ):
-    variable_source = services.VariableClient(
-        source=learner,
-        key=variable_client_key,
-    )
+    variable_source = services.VariableClient(source=learner)
     evaluation_policy = services.EvaluationPolicy(
         policy_fn=policy_graph,
         initial_state_fn=initial_state_graph,

@@ -10,7 +10,9 @@ from pyspiel import PlayerId as TurnId
 from marl import _types, worlds
 
 _CURRENT_PLAYER = "current_player"
-_SERIALIZED_STATE = "serialized_state"
+SERIALIZED_STATE = "serialized_state"
+LEGAL_ACTIONS = "legal_actions"
+INFO_STATE = "info_state"
 
 
 class OpenSpielProxy(worlds.Game):
@@ -56,9 +58,18 @@ class OpenSpielProxy(worlds.Game):
         return {id: worlds.ArraySpec(shape=(), dtype=np.float32, name="reward") for id in range(self._num_players)}
 
     def observation_specs(self) -> worlds.PlayerIDToSpec:
-        """Describes the observations provided by the environment."""
+        """Describes the observations provided by the environment.
+
+        NOTE: If serialized-state is provided in the observation it is not described by the observation spec.
+        Since it is a string-type that cannot be handled by computational graphs, it is not described, and
+        it is expected that the user requesting the serialized-state will properly account for it.
+        """
         openspiel_spec = self._game.observation_spec()
-        spec = worlds.ArraySpec(shape=openspiel_spec["info_state"], dtype=np.float32, name="info_state")
+
+        spec = {
+            "info_state": worlds.ArraySpec(shape=openspiel_spec["info_state"], dtype=np.float64, name="info_state"),
+            "legal_actions": worlds.ArraySpec(shape=openspiel_spec["legal_actions"], dtype=bool, name="legal_actions"),
+        }
         return {id: spec for id in range(self._num_players)}
 
     def action_specs(self) -> worlds.PlayerIDToSpec:
@@ -66,7 +77,7 @@ class OpenSpielProxy(worlds.Game):
         openspiel_spec = self._game.action_spec()
         spec = worlds.BoundedArraySpec(
             shape=(),
-            dtype=openspiel_spec["dtype"],
+            dtype=np.int32,
             minimum=openspiel_spec["min"],
             maximum=openspiel_spec["max"],
             name="action",
@@ -79,20 +90,29 @@ class OpenSpielProxy(worlds.Game):
         current_player = timesteps.observations[_CURRENT_PLAYER]
         del timesteps.observations[_CURRENT_PLAYER]
 
+        # Remove serialized state from observations as default, since JAX graphs cannot handle strings.
         serialized_state = None
-        if _SERIALIZED_STATE in timesteps.observations:
-            serialized_state = timesteps.observations[_SERIALIZED_STATE]
-        del timesteps.observations[_SERIALIZED_STATE]
+        if SERIALIZED_STATE in timesteps.observations:
+            serialized_state = timesteps.observations[SERIALIZED_STATE]
+        del timesteps.observations[SERIALIZED_STATE]
 
         # Collect the player-specific components in independent observations.
-        observations = {id: {k: v[id] for k, v in timesteps.observations.items()} for id in range(self._num_players)}
+        observations = {
+            id: {k: np.asarray(v[id]) for k, v in timesteps.observations.items()} for id in range(self._num_players)
+        }
         if serialized_state:
             for id in observations.keys():
-                observations[id][_SERIALIZED_STATE] = serialized_state
+                observations[id][SERIALIZED_STATE] = serialized_state
+
+        # Legal actions is an observation field listing the action IDs that are legal
+        # for the current information state. This creates a dynamic length sequence which is problematic.
+        # Convert that into a mask of the possible actions.
+        for id in range(self._num_players):
+            observations[id][LEGAL_ACTIONS] = self._legal_actions_to_mask(id, observations[id][LEGAL_ACTIONS])
 
         # Parse rewards independent of observation, because they can be globally None, or per-player scalars.
         if timesteps.rewards:
-            rewards = {id: timesteps.rewards[id] for id in range(self._num_players)}
+            rewards = {id: np.asarray(timesteps.rewards[id], dtype=np.float32) for id in range(self._num_players)}
         else:
             rewards = np.zeros(self._num_players, dtype=np.float32)
 
@@ -114,3 +134,11 @@ class OpenSpielProxy(worlds.Game):
         else:
             # It's an individual player's turn.
             return {current_player: converted_timesteps[current_player]}
+
+    def _legal_actions_to_mask(self, player_id: _types.PlayerID, legal_actions: _types.Array) -> _types.Array:
+        """Converts a list of legal actions into a boolean mask for the action's legality."""
+        mask = np.zeros(self.action_specs()[player_id].maximum + 1, dtype=bool)
+        # Legal actions is empty at the end of the episode.
+        if len(legal_actions):
+            mask[legal_actions] = True
+        return mask

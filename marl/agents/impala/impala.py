@@ -1,12 +1,12 @@
 import functools
-from typing import Callable, Mapping, NamedTuple, Optional, Tuple
+from typing import Mapping, NamedTuple, Optional, Tuple
 
 import chex
+import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
-import reverb
 import rlax
 import tree
 
@@ -64,6 +64,7 @@ class IMPALA(hk.RNNCore):
             raise ValueError("Policy head must have attribute `num_actions`.")
 
     def __call__(self, timestep: worlds.TimeStep, state: IMPALAState) -> Tuple[_types.Action, IMPALAState]:
+        """Forward pass of IMPALA's policy."""
         embeddings = self._timestep_encoder(timestep, state)
         embeddings, new_recurrent_state = self._memory_core(embeddings, state.recurrent_state)
         logits = self._policy_head(embeddings)
@@ -75,6 +76,7 @@ class IMPALA(hk.RNNCore):
         return action, IMPALAState(recurrent_state=new_recurrent_state, logits=logits, prev_action=action)
 
     def initial_state(self, batch_size: Optional[int]):
+        """Generates an initial state for the policy."""
         return IMPALAState(
             recurrent_state=self._memory_core.initial_state(batch_size),
             logits=np.zeros([self._policy_head.num_actions], dtype=np.float32),
@@ -83,6 +85,7 @@ class IMPALA(hk.RNNCore):
         )
 
     def state_spec(self) -> worlds.TreeSpec:
+        """Specification describing the state of the policy."""
         return spec_utils.make_tree_spec(self.initial_state(None))
 
     def unroll(self, timestep: worlds.TimeStep, state_and_extras: IMPALAState):
@@ -193,10 +196,19 @@ class IMPALA(hk.RNNCore):
             rewards=rewards,
             mask=padding_mask,
         )
+        metrics = tree.map_structure(jnp.mean, metrics)
+
+        metrics["batch_size"] = actions.shape[0]
+
+        # Log the average policy to monitor distribution collapse.
+        policy = distrax.Softmax(logits=logits).probs
+        policy = jnp.mean(jnp.reshape(policy, [-1, policy.shape[-1]]), axis=0)
+        metrics["policy"] = policy
+
+        # Log the average values across the sequence.
+        metrics["value"] = jnp.mean(values, axis=0)
 
         mean_loss = jnp.mean(mean_loss)
-        metrics = tree.map_structure(jnp.mean, metrics)
-        metrics["batch_size"] = actions.shape[0]
         return mean_loss, metrics
 
 

@@ -1,5 +1,6 @@
 from typing import Callable, Optional
 
+import numpy as np
 import tensorflow as tf
 
 from marl.utils.loggers import base
@@ -31,11 +32,18 @@ class TensorboardLogger(base.Logger):
 
     def write(self, data: base.LogData):
         step = data[self._step_key] if self._step_key is not None else self._num_calls
-
         with self._summary_writer.as_default():
             for key, value in data.items():
+                num_dims = len(np.asarray(value).shape)
                 key = self._key_format_fn(key) if self._key_format_fn else key
-                tf.summary.scalar(key, data=value, step=step)
+                if num_dims == 0:
+                    tf.summary.scalar(key, data=value, step=step)
+                elif num_dims == 1:
+                    tf.summary.histogram(key, data=value, step=step)
+                elif (num_dims == 2) or (num_dims == 3):
+                    tf.summary.image(key, data=value, step=step)
+                else:
+                    raise ValueError(f"Logging data with {num_dims} dims undefined.")
 
         self._num_calls += 1
 

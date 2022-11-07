@@ -18,7 +18,7 @@ class MLPTimestepEncoder(hk.Module):
 
     def __call__(self, timestep: worlds.TimeStep, state: _types.State) -> _types.Tree:
         """Forward pass of the encoder."""
-        observation = timestep.observation["info_state"].astype(float)
+        observation = jnp.asarray(timestep.observation["info_state"], dtype=float)
         h = self._net(observation)
         return h
 
