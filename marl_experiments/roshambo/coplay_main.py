@@ -16,7 +16,7 @@ from marl_experiments.roshambo.services import evaluation_arena
 from marl_experiments.roshambo.utils import utils as rps_utils
 
 _RESULT_DIR = "/scratch/wellman_root/wellman1/mxsmith/data/roshambo/coplay"
-_NUM_EPISODES = 100
+_NUM_EPISODES = 1_000
 
 
 flags.DEFINE_integer("num_workers", 7, "Number of worker processes.")
@@ -96,7 +96,7 @@ def main(_):
     bot_names = roshambo_bot.ROSHAMBO_BOT_NAMES
 
     with multiprocessing.Pool(processes=FLAGS.num_workers) as pool:
-        jobs = [(name0, name1) for name0, name1 in itertools.combinations_with_replacement(bot_names, 2)]
+        jobs = [(name0, name1) for name0, name1 in itertools.product(bot_names, repeat=2)]
         results = pool.map(worker, jobs)
 
         logging.info("Finished profiles:")

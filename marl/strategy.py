@@ -28,13 +28,13 @@ class Strategy(individuals.Bot):
     ) -> Tuple[_types.Tree, _types.State]:
         """Selects an action to take given the current timestep."""
         assert self._policy, "Episode-reset must be called before step."
-        return self._policy.step(timestep, state, **kwargs)
+        return self._policy.step(timestep=timestep, state=state, **kwargs)
 
     def episode_reset(self, timestep: worlds.TimeStep, **kwargs):
         """Reset the state of the agent at the start of an epsiode.."""
         policy_index = self._rng.choice(len(self._policies), p=self._mixture)
         self.set_policy(policy_index)
-        return self._policy.episode_reset(timestep, **kwargs)
+        return self._policy.episode_reset(timestep=timestep, **kwargs)
 
     def set_policy(self, policy_id: int):
         """Set the policy for the next episode."""

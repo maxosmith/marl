@@ -10,20 +10,29 @@ from marl.utils import signals
 class StepsLimiter:
     """Process that terminates an experiment when `max_steps` is reached."""
 
-    def __init__(self, counter: Counter, max_steps: int, steps_key: str = "actor_steps"):
-        self._counter = counter
+    def __init__(self, counter: lp.CourierHandle, max_steps: int, step_key: str = "actor_steps"):
+        """Initializes an instance of a StepsLimiter.
+
+        Args:
+            counter: Counter service maintaining global counts across services.
+            max_steps: Maximum number of steps to allow before terminating the program.
+                NOTE: This is a lower-bound, because we are not garaunteed to check the count
+                at every value. Instead, we terminate the program whenver this threshold is crossed.
+            step_key: Key associated with the limited step maintained by the counter.
+        """
+        self._counter = Counter(parent=counter)
         self._max_steps = max_steps
-        self._steps_key = steps_key
+        self._step_key = step_key
 
     def run(self):
         """Run steps limiter to terminate an experiment when max_steps is reached."""
 
-        logging.info("StepsLimiter: Starting with max_steps = %d (%s)", self._max_steps, self._steps_key)
+        logging.info("StepsLimiter: Starting with max_steps = %d (%s)", self._max_steps, self._step_key)
         with signals.runtime_terminator():
             while True:
                 # Update the counts.
                 counts = self._counter.get_counts()
-                num_steps = counts.get(self._steps_key, 0)
+                num_steps = counts.get(self._step_key, 0)
 
                 logging.info("StepsLimiter: Reached %d recorded steps", num_steps)
 

@@ -2,8 +2,7 @@
 import dataclasses
 import operator
 import time
-from typing import (Any, Callable, Mapping, NamedTuple, Optional, Sequence,
-                    Union)
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence, Union
 
 import numpy as np
 import tree
@@ -109,7 +108,7 @@ class EvaluationArena(base.ArenaInterface):
 
         # Get the current state of all learning agents.
         for agent in self._agents.values():
-            agent.sync_params()
+            agent.update()
 
         for scenario in self._scenarios:
             if scenario.name:

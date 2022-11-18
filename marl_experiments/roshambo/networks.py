@@ -23,6 +23,26 @@ class MLPTimestepEncoder(hk.Module):
         return h
 
 
+class MemoryCore(hk.Module):
+    def __init__(self, name: Optional[str] = "memory_core"):
+        super().__init__(name=name)
+        self._core = hk.LSTM(6)
+
+    def __call__(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, hk.LSTMState]:
+        outputs, new_state = self._core(inputs, state)
+        return outputs, new_state
+
+    def initial_state(self, batch_size: Optional[int]) -> hk.LSTMState:
+        return self._core.initial_state(batch_size)
+
+    def unroll(self, inputs: _types.Tree, state: hk.LSTMState) -> Tuple[_types.Tree, hk.LSTMState]:
+        """This should be for additional time dimension over call"""
+        outputs, new_state = hk.static_unroll(
+            core=self._core, input_sequence=inputs, initial_state=state, time_major=False
+        )
+        return outputs, new_state
+
+
 class NoopCore(hk.Module):
     """Skip's the memory component of an IMPALA agent."""
 
@@ -68,7 +88,7 @@ class ValueHead(hk.Module):
         """Initializes an instance of a ValueHead."""
         super().__init__(name=name)
         self.num_actions = num_actions
-        self._value_head = hk.Linear(self.num_actions if self.num_actions else 1)
+        self._value_head = hk.Linear(1)
 
     def __call__(self, inputs: _types.Tree) -> Tuple[_types.Action, _types.Tree]:
         """Forward pass of the module."""

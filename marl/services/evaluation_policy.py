@@ -54,6 +54,6 @@ class EvaluationPolicy:
             raise ValueError("Reset must be called after the first timestep.")
         return state
 
-    def sync_params(self):
+    def update(self):
         """Force the learner to synchronize its parameters with its variable source."""
         self._variable_source.update_and_wait()

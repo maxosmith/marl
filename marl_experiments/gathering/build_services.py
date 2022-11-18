@@ -11,6 +11,7 @@ import numpy as np
 import optax
 import reverb
 from absl import app, logging
+from ml_collections import config_dict
 
 from marl import _types, bots, games, individuals, services, utils, worlds
 from marl.agents import impala
@@ -18,6 +19,7 @@ from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
 from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import import_utils, loggers, node_utils, signals, spec_utils, wrappers
+from marl.utils.loggers import terminal as terminal_logger_lib
 
 
 @dataclasses.dataclass
@@ -34,13 +36,15 @@ def build_computational_graphs(config, env_spec: worlds.EnvironmentSpec):
 
     def _impala_graphs():
         num_actions = env_spec.action.num_values
-        config.timestep_encoder_kwargs["num_actions"] = num_actions
-        config.policy_head_kwargs["num_actions"] = num_actions
 
-        timestep_encoder = import_utils.initialize(config.timestep_encoder_ctor, config.timestep_encoder_kwargs)
-        memory_core = import_utils.initialize(config.memory_core_ctor, config.memory_core_kwargs)
-        policy_head = import_utils.initialize(config.policy_head_ctor, config.policy_head_kwargs)
-        value_head = import_utils.initialize(config.value_head_ctor, config.value_head_kwargs)
+        timestep_encoder = import_utils.initialize(
+            config.timestep_encoder_ctor, num_actions=num_actions, **config.timestep_encoder_kwargs
+        )
+        memory_core = import_utils.initialize(config.memory_core_ctor, **config.memory_core_kwargs)
+        policy_head = import_utils.initialize(
+            config.policy_head_ctor, num_actions=num_actions, **config.policy_head_kwargs
+        )
+        value_head = import_utils.initialize(config.value_head_ctor, **config.value_head_kwargs)
 
         impala_kwargs = dict(
             # Sub-modules.
@@ -121,20 +125,45 @@ def build_learner_node(
     loss_graph: hk.Transformed,
     replay: lp.CourierHandle,
     counter: lp.CourierHandle,
+    optimizer_name: str,
+    optimizer_config: config_dict.ConfigDict,
     result_dir: utils.ResultDirectory,
 ):
+    # Print (key, values) to unique lines to account for non-scalar values.
+    format_fn = lambda x: terminal_logger_lib.data_to_string(x, "\n")
+
     logger = loggers.LoggerManager(
         loggers=[
-            loggers.TerminalLogger(time_frequency=5),
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=format_fn),
             loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key),
         ],
         time_frequency=5,  # Seconds.
     )
     local_counter = services.Counter(parent=counter)
 
+    optimizer = None
+    if optimizer_name == "adam":
+        optimizer = optax.adam
+    elif optimizer_name == "rmsprop":
+        optimizer = optax.rmsprop
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_name}.")
+
     optimizer = optax.chain(
-        optax.clip_by_global_norm(config.max_gradient_norm),
-        optax.adam(config.learning_rate),
+        optax.inject_hyperparams(optax.clip_by_global_norm)(
+            max_norm=optax.linear_schedule(
+                init_value=optimizer_config.max_norm_init,
+                end_value=optimizer_config.max_norm_end,
+                transition_steps=optimizer_config.max_norm_steps,
+            )
+        ),
+        optax.inject_hyperparams(optimizer)(
+            learning_rate=optax.linear_schedule(
+                init_value=optimizer_config.learning_rate_init,
+                end_value=optimizer_config.learning_rate_end,
+                transition_steps=optimizer_config.learning_rate_steps,
+            )
+        ),
     )
 
     data_iterator = services.ReverbPrefetchClient(
@@ -182,11 +211,7 @@ def build_training_arena_node(
     )
     # Variable client is responsible for syncing with the Updating node, but does not tell
     # that node when it should update.
-    variable_source = services.VariableClient(
-        source=learner,
-        key=config.variable_client_key,
-        update_period=config.variable_update_period,
-    )
+    variable_source = services.VariableClient(source=learner)
     policy = services.LearnerPolicy(
         policy_fn=policy_graph,
         initial_state_fn=initial_state_graph,
@@ -224,10 +249,7 @@ def build_evaluation_arena_node(
     game_ctor,
     result_dir: utils.ResultDirectory,
 ):
-    variable_source = services.VariableClient(
-        source=learner,
-        key=config.variable_client_key,
-    )
+    variable_source = services.VariableClient(source=learner)
     evaluation_policy = services.EvaluationPolicy(
         policy_fn=policy_graph,
         initial_state_fn=initial_state_graph,

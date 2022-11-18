@@ -2,7 +2,16 @@
 
 import abc
 import time
-from typing import Callable, Iterable, Mapping, NamedTuple, Optional, Sized, Tuple, Union
+from typing import (
+    Callable,
+    Iterable,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sized,
+    Tuple,
+    Union,
+)
 
 import dm_env
 import numpy as np
@@ -152,7 +161,6 @@ class ReverbAdder(base.Adder):
             # Complete the remaining row's information that was started during the previous timestep.
             self._writer.append(dict(reward=timestep.reward))
             self._write()
-
         has_extras = len(extras) > 0 if isinstance(extras, Sized) else extras is not None
         current_step = dict(
             observation=timestep.observation,
@@ -175,7 +183,6 @@ class ReverbAdder(base.Adder):
             dummy_step["start_of_episode"] = timestep.first()
             dummy_step["end_of_episode"] = timestep.last()
             dummy_step["reward"] = tree.map_structure(np.zeros_like, timestep.reward)
-
             self._writer.append(dummy_step)
             self._write_last()
             self.reset()

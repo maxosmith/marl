@@ -1,10 +1,6 @@
-"""
-
-References:
- - https://github.com/deepmind/acme/blob/77fb814eba749946a3e31ac2cb70f5ec4c9bff3c/acme/agents/jax/impala/learning.py
-"""
+"""Performs behavioural cloning for the RPS bots."""
 import itertools
-from typing import NamedTuple, Optional, Sequence
+from typing import Any, Iterator, NamedTuple, Optional, Sequence
 
 import haiku as hk
 import jax
@@ -13,7 +9,7 @@ import reverb
 import tree
 from absl import logging
 
-from marl import _types, services
+from marl import _types, services, worlds
 from marl.services import counter as counter_lib
 from marl.utils import distributed_utils, loggers
 
@@ -25,21 +21,19 @@ class TrainingState(NamedTuple):
     opt_state: optax.OptState
 
 
-class LearnerUpdate:
+class Learner:
     """Service providing a learner's policy/step function."""
-
-    _PMAP_AXIS_NAME = "data"
 
     def __init__(
         self,
         loss_fn: hk.Transformed,
         optimizer: optax.GradientTransformation,
-        random_key: jax.random.KeyArray,
-        data_iterator: Sequence[reverb.ReplaySample],
+        key_sequence: hk.PRNGSequence,
+        data_iterator: Iterator[Any],
         logger: Optional[loggers.Logger] = None,
         counter: Optional[counter_lib.Counter] = None,
-        step_key: str = "update_steps",
-        frame_key: str = "update_frames",
+        step_key: str = "learner_steps",
+        frame_key: str = "learner_frames",
     ):
         """Initialize a learner's update node.
 
@@ -47,18 +41,20 @@ class LearnerUpdate:
             agent:
             optimizer:
             reverb_client:
-            random_key:
         """
         self._logger = logger
         self._counter = counter
         self._step_key = step_key
         self._frame_key = frame_key
         self._data_iterator = data_iterator
-        self._random_key = random_key
+        self._key_sequence = key_sequence
 
         @jax.jit
         def _update_step(
-            params: _types.Params, rng: jax.random.PRNGKey, opt_state: optax.OptState, sample: reverb.ReplaySample
+            params: _types.Params,
+            rng: jax.random.PRNGKey,
+            opt_state: optax.OptState,
+            sample: Any,
         ):
             # Compute gradients.
             grad_fn = jax.value_and_grad(loss_fn.apply, has_aux=True)
@@ -78,7 +74,8 @@ class LearnerUpdate:
             return new_state, metrics
 
         self._update_step = _update_step
-        params = loss_fn.init(random_key)
+        # TODO(maxsmith): Refactor so that parameter initialization does not require a real batch.
+        params = loss_fn.init(next(self._key_sequence), self._preprocess_data(next(self._data_iterator)))
         opt_state = optimizer.init(params)
         self._state = TrainingState(params=params, opt_state=opt_state)
 
@@ -91,27 +88,46 @@ class LearnerUpdate:
 
     def step(self):
         """Perform a single update step."""
-        reverb_sample = next(self._data_iterator)
-        # Remove device dimension that was added by the prefetch client.
-        reverb_sample = tree.map_structure(lambda x: x[0], reverb_sample)
+        batch = next(self._data_iterator)
+        batch = self._preprocess_data(batch)
 
         self._state, metrics = self._update_step(
             params=self._state.params,
-            rng=self._random_key,
+            rng=next(self._key_sequence),
             opt_state=self._state.opt_state,
-            sample=reverb_sample.data,
+            sample=batch,
         )
 
         if self._counter:
-            counts = self._counter.increment(
-                **{
-                    self._step_key: 1,
-                }
-            )
+            counts = {self._step_key: 1}
+            counts = self._counter.increment(**counts)
             metrics[self._step_key] = counts[self._step_key]
 
         if self._logger:
             self._logger.write(metrics)
+
+    def _preprocess_data(self, batch):
+        """Preprocess the data to match the expected API for the update network."""
+        observation = batch["observations"]  # [B, T, 6].
+        demonstration = batch["actions"][..., 0]  # [B, T].
+        self_id = batch["bot_ids"][..., 0]  # [B, T].
+        opp_id = batch["bot_ids"][..., 1]  # [B, T].
+        padding_mask = batch["padding_mask"]  # [B, T].
+
+        # Convert the batch to match time Timetep interface. Only the observation
+        # field is used by the TimestepEncoder, so fill the rest with dummy values.
+        timestep = worlds.TimeStep(
+            step_type=0,
+            observation={
+                "info_state": observation,
+                "self_id": self_id,
+                "opp_id": opp_id,
+                "demonstration": demonstration,
+                "padding_mask": padding_mask,
+            },
+            reward=0,
+        )
+        return timestep
 
     def get_variables(self, names: Optional[Sequence[str]] = None) -> _types.Params:
         # Return first replica of parameters.

@@ -6,6 +6,7 @@ from typing import Mapping, Optional
 
 import numpy as np
 import tree
+from absl import logging
 
 from marl import _types, individuals, utils, worlds
 from marl.games import openspiel_proxy
@@ -75,6 +76,10 @@ class TrainingArena(base.ArenaInterface):
         episode_return = spec_utils.zeros_from_spec(self.game.reward_specs())
         stopwatch = utils.Stopwatch()
 
+        stopwatch.start(_StopwatchKeys.UPDATE.value)
+        self._maybe_sychronize_agent_parameters()
+        stopwatch.stop(_StopwatchKeys.UPDATE.value)
+
         timesteps = self.game.reset()
 
         player_states = {}
@@ -104,10 +109,6 @@ class TrainingArena(base.ArenaInterface):
                 operator.iadd, episode_return, {id: ts.reward for id, ts in timesteps.items()}
             )
             stopwatch.stop(_StopwatchKeys.TRANSITION.value)
-
-            stopwatch.start(_StopwatchKeys.UPDATE.value)
-            self._maybe_sychronize_agent_parameters()
-            stopwatch.stop(_StopwatchKeys.UPDATE.value)
 
             stopwatch.stop(_StopwatchKeys.STEP.value)
 
@@ -178,6 +179,6 @@ class TrainingArena(base.ArenaInterface):
 
     def _maybe_sychronize_agent_parameters(self):
         """Maybe update the agent's parameters."""
-        for id, player in self.players.items():
+        for player in self.players.values():
             if isinstance(player, individuals.Agent):
-                player.sync_params()
+                player.update()

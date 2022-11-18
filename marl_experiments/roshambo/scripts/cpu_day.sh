@@ -5,9 +5,9 @@
 #SBATCH --mail-user=max.olan.smith@gmail.com
 #SBATCH --mail-type=ALL
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=5
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem-per-cpu=10g
+#SBATCH --mem-per-cpu=4g
 #SBATCH --time=1-00:00
 #SBATCH --account=wellman1
 #SBATCH --partition=standard
@@ -32,8 +32,4 @@ unset __conda_setup
 conda init bash
 conda activate model38
 
-#echo $1
-#eval $1
-
-python sweep_worker.py --config_dir=$1
-# python experiment_dqn.py
+python $1

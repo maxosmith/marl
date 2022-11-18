@@ -8,22 +8,21 @@ import launchpad as lp
 import numpy as np
 import optax
 import reverb
-from absl import app
+from absl import app, logging
 
 from marl import bots, games, services, utils, worlds
 from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import loggers, node_utils, spec_utils, wrappers
+from marl.utils.loggers import terminal as terminal_logger_lib
 from marl_experiments.gathering import networks
-from marl_experiments.gathering.experiment import build_training_arena_node
-from marl_experiments.gathering.services import (model_dataset_arena,
-                                                 supervised_learning)
+from marl_experiments.gathering.services import model_dataset_arena, supervised_learning
 from marl_experiments.gathering.world_model import WorldModel
 
 
 @dataclasses.dataclass
 class ModelTrainConfig:
 
-    result_dir: str = "/scratch/wellman_root/wellman1/mxsmith/tests/model_train"
+    result_dir: str = "/scratch/wellman_root/wellman1/mxsmith/results/marl/gathering/test_model_train"
     step_key: str = "step"
     frame_key: str = "frame"
 
@@ -124,9 +123,12 @@ def build_update_node(
     reverb_handle: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ):
+
+    format_fn = lambda x: terminal_logger_lib.data_to_string(x, "\n")
+
     logger = loggers.LoggerManager(
         loggers=[
-            loggers.TerminalLogger(time_frequency=5),
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=format_fn),
             loggers.TensorboardLogger(result_dir.dir),
         ],
         time_frequency=5,  # Seconds.
@@ -162,7 +164,13 @@ def build_update_node(
 
 
 def build_game():
-    game = games.Gathering(n_agents=2, map_name="default_small", global_observation=True)
+    game = games.Gathering(
+        n_agents=2,
+        map_name="default_small",
+        global_observation=False,
+        viewbox_width=10,
+        viewbox_depth=10,
+    )
     game = wrappers.TimeLimit(game, num_steps=100)
     return game
 
@@ -176,8 +184,8 @@ def main(_):
     env_spec = spec_utils.make_game_specs(game)[0]
 
     players = {
-        0: bots.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec),
-        1: bots.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec),
+        0: bots.RandomIntAction(num_actions=env_spec.action.num_values),
+        1: bots.RandomIntAction(num_actions=env_spec.action.num_values),
     }
 
     _, loss, initial_state = build_computational_graphs(config=config, env_spec=env_spec)
@@ -203,8 +211,10 @@ def main(_):
 
     lp.launch(program, launch_type=lp.LaunchType.LOCAL_MULTI_THREADING, serialize_py_nodes=False)
 
+    logging.info("Generating dataset...")
     arena_client = arena_handle.dereference()
     arena_client.run(num_episodes=config.replay_max_size / 100)  # Episode length is 100.
+    logging.info("Dataset created.")
 
     train_client = train_handle.dereference()
     while True:

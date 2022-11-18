@@ -7,13 +7,14 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import rlax
 import tree
 
 from marl import _types, worlds
 from marl.services.replay.reverb.adders import reverb_adder
 from marl.services.replay.reverb.adders import utils as reverb_utils
-from marl.utils import loggers, spec_utils
+from marl.utils import loggers, spec_utils, stats_utils
 
 
 class IMPALAState(NamedTuple):
@@ -202,11 +203,12 @@ class IMPALA(hk.RNNCore):
 
         # Log the average policy to monitor distribution collapse.
         policy = distrax.Softmax(logits=logits).probs
-        policy = jnp.mean(jnp.reshape(policy, [-1, policy.shape[-1]]), axis=0)
+        metrics["policy_most_likely_action"] = jnp.mean(jnp.max(policy, axis=-1))
+        policy = jnp.mean(policy, axis=[0, 1])  # [B, T, A] --> [A].
         metrics["policy"] = policy
 
         # Log the average values across the sequence.
-        metrics["value"] = jnp.mean(values, axis=0)
+        metrics["value"] = jnp.mean(values, axis=0)  # [B, T] --> [T].
 
         mean_loss = jnp.mean(mean_loss)
         return mean_loss, metrics
@@ -281,5 +283,13 @@ def impala_loss(
         "scaled_critic_loss": baseline_cost * critic_loss,
         "entropy_loss": entropy_loss,
         "scaled_entropy_loss": entropy_cost * entropy_loss,
+        "critic_explained_variance": stats_utils.explained_variance(
+            y=rewards[..., None] + discount * values_t[..., None],  # TD target.
+            pred=values_tm1[..., None],
+        ),
+        "kl_vs_target": optax._src.loss.kl_divergence(
+            log_predictions=jnp.log(jax.nn.softmax(logits)),
+            targets=jax.nn.softmax(behaviour_logits),
+        ),
     }
     return mean_loss, metrics

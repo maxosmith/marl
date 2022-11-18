@@ -6,29 +6,29 @@ References:
 import dataclasses
 import functools
 import itertools
-from typing import Any, Dict, Iterable, List, Sequence, Union
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Union
 
-import ml_collections
+import six
+from ml_collections import config_dict
 
-Config = Union[Dict[str, Any], ml_collections.ConfigDict]
-Sweep = List[Config]
+Sweep = List[config_dict.ConfigDict]
 
 
 def fixed(parameter_name: str, value: Any) -> Sweep:
     """Creates a sweep for a single parameter/value pair."""
-    return [{parameter_name: value}]
+    return [_create_config_dict_from_partially_flat({parameter_name: value})]
 
 
 def sweep(parameter_name: str, values: Iterable[Any]) -> Sweep:
     """Creates a sweep from a list of values for a parameter."""
-    return [{parameter_name: value} for value in values]
+    return [_create_config_dict_from_partially_flat({parameter_name: value}) for value in values]
 
 
 def dataclass(config: Any) -> Sweep:
     """Creates a sweep from a dataclass."""
     if not dataclasses.is_dataclass(config):
         raise ValueError(f"Expected a dataclass object, got {type(config)}.")
-    return [dict(config.__dict__)]
+    return [_create_config_dict_from_partially_flat(dataclasses.asdict(config))]
 
 
 def product(sweeps: Sequence[Sweep]) -> Sweep:
@@ -56,7 +56,7 @@ def default(base: Any, overrides: Sequence[Sweep]) -> Sweep:
         return y
 
     def _dataclass_update(x, y):
-        return _dict_update(x.__dict__, y)
+        return _dict_update(dataclasses.asdict(x), y)
 
     _update = _dataclass_update if dataclasses.is_dataclass(base) else _dict_update
     return [_update(base, override) for override in overrides]
@@ -73,11 +73,36 @@ def cast(config_type: Any, sweeps: Sequence[Sweep]) -> List[Any]:
     return [config_type(**sweep) for sweep in sweeps]
 
 
-def _combine_parameter_dicts(x: Dict[str, Any], y: Dict[str, Any]) -> Dict[str, Any]:
-    if x.keys() & y.keys():
-        raise ValueError(
-            "Cannot combine sweeps that set the same parameters. "
-            f"Keys in x: {x.keys()}, keys in y: {y.keys}, "
-            f"overlap: {x.keys() & y.keys()}"
-        )
-    return {**x, **y}
+def _combine_parameter_dicts(x: Mapping[str, Any], y: Mapping[str, Any]) -> config_dict.ConfigDict:
+    """Combine to parameter dictionaries."""
+    config = _create_config_dict_from_partially_flat(x)
+    config.update(_create_config_dict_from_partially_flat(y))
+    return config
+
+
+def _create_config_dict_from_partially_flat(input: Any) -> config_dict.ConfigDict:
+    """Create a config-dict from a partially flat dictionary/config-dict."""
+    if (not isinstance(input, config_dict.ConfigDict)) and (not isinstance(input, dict)):
+        # Recursive base case.
+        return input
+
+    config = config_dict.ConfigDict()
+
+    for key, value in six.iteritems(input):
+        if "." in key:
+            # This entry is hierarchical.
+            tokens = key.split(".")
+            new_children = _create_config_dict_from_partially_flat({".".join(tokens[1:]): value})
+
+            if tokens[0] in config:
+                # A sub-config already exists, so we need to build-out our new children
+                # seperately and then merge the two configs.
+                config[tokens[0]].update(new_children)
+            else:
+                # Otherwise, the new children define the start of this sub-config.
+                config[tokens[0]] = new_children
+
+        else:
+            config[key] = _create_config_dict_from_partially_flat(value)
+
+    return config

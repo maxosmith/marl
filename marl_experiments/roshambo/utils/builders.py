@@ -82,7 +82,9 @@ def build_learner_node(
     result_dir: utils.ResultDirectory,
     *,
     replay_table_name: str,
-    learning_rate: float,
+    learning_rate_init: float,
+    learning_rate_end: float,
+    learning_rate_steps: int,
     max_gradient_norm: float,
     batch_size: int,
 ):
@@ -102,7 +104,13 @@ def build_learner_node(
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_gradient_norm),
-        optax.adam(learning_rate),
+        optax.inject_hyperparams(optax.adam)(
+            learning_rate=optax.linear_schedule(
+                init_value=learning_rate_init,
+                end_value=learning_rate_end,
+                transition_steps=learning_rate_steps,
+            )
+        ),
     )
 
     data_iterator = services.ReverbPrefetchClient(
@@ -134,7 +142,6 @@ def build_training_arena_node(
     bots,
     replay_table_name: str,
     sequence_length: int,
-    variable_update_period: int,
     step_key: str,
     result_dir: utils.ResultDirectory,
     sequence_period: Optional[int] = None,
@@ -143,8 +150,6 @@ def build_training_arena_node(
 
     Args:
         variable_client_key: Variable name to request from the learner (variable source).
-        variable_update_period: Interval between fetches, specified as the number of calls to the
-            variable update() method.
         step_key:
     """
     # NOTE: That the last transition in the sequence is used for bootstrapping
@@ -158,10 +163,7 @@ def build_training_arena_node(
     )
     # Variable client is responsible for syncing with the Updating node, but does not tell
     # that node when it should update.
-    variable_source = services.VariableClient(
-        source=learner,
-        update_period=variable_update_period,
-    )
+    variable_source = services.VariableClient(source=learner)
     policy = services.LearnerPolicy(
         policy_fn=policy_graph,
         initial_state_fn=initial_state_graph,
@@ -176,7 +178,7 @@ def build_training_arena_node(
     players = bots
     players[0] = policy
 
-    logger = loggers.TensorboardLogger(result_dir.dir, step_key=step_key)
+    logger = loggers.TensorboardLogger(result_dir.dir)
     train_arena = training_arena.TrainingArena(
         game=game,
         players=players,
@@ -207,7 +209,7 @@ def build_evaluation_arena_node(
         variable_source=variable_source,
         random_key=random_key,
     )
-    logger = loggers.TensorboardLogger(result_dir.dir, step_key=step_key)
+    logger = loggers.TensorboardLogger(result_dir.dir)
     local_counter = services.Counter(parent=counter)
 
     return evaluation_arena.EvaluationArena(

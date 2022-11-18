@@ -5,6 +5,7 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import tree
 
 from marl import _types, worlds
@@ -118,21 +119,58 @@ class WorldModel(hk.RNNCore):
         reward = reward[:, 1:]
         padding_mask = reverb_utils.padding_mask(data)[:, 1:]
 
-        observation_loss = distrax.Categorical(probs=next_observation).cross_entropy(
-            distrax.Categorical(logits=pred_observation)
-        )
-        observation_loss = jnp.nan_to_num(observation_loss)  # Mask out NaNs from padded observations.
-        observation_loss = (observation_loss.T * padding_mask.T).T  # Put [B, T] at end for broadcasting.
-        observation_loss = jnp.mean(observation_loss)
-        # reward_loss = distrax.Categorical(probs=reward).cross_entropy(distrax.Categorical(logits=pred_reward))
+        # Compute the observation's loss through cross entropy.
+        observation_loss = optax.softmax_cross_entropy(logits=pred_observation, labels=next_observation)
+        observation_loss = jnp.mean(observation_loss, axis=[-2, -1])
+        observation_loss = jnp.where(padding_mask, observation_loss, jnp.zeros_like(observation_loss))
+        observation_loss = jnp.mean(observation_loss)  # NOTE: This averaging does not consider padded arrays.
+
+        # Compute the reward's loss through regression.
         reward_loss = 0.0
-        reward_loss = jnp.mean(reward_loss)
 
         loss = observation_loss + self._reward_cost * reward_loss
+
         metrics = dict(
             loss=loss,
             observation_loss=observation_loss,
             reward_loss=reward_loss,
             scaled_reward_loss=self._reward_cost * reward_loss,
         )
+        metrics.update(self._accuracy_metrics(next_observation, pred_observation, padding_mask))
         return loss, metrics
+
+    def _accuracy_metrics(
+        self, next_observation: _types.Array, pred_observation: _types.Array, padding_mask: _types.Array
+    ) -> Mapping[str, _types.Array]:
+        """Compute accuracy metrics for a prediction.
+
+        Args:
+            next_observation: Ground-truth next observation [B, T, W, H, C].
+            pred_observation: Predicted observation [B, T, W, H, C].
+            padding_mask: Mask flagging if an example is padding [B, T].
+        """
+        metrics = {}
+
+        # Convert from one-hot to class indices.
+        next_classes = jnp.argmax(next_observation, axis=-1)  # [B, T, W, H].
+        pred_classes = jnp.argmax(pred_observation, axis=-1)  # [B, T, W, H].
+        correct_predictions = next_classes == pred_classes
+
+        # Reshape padding mask so that it can be applied across observations.
+        padding_mask = padding_mask[:, :, None, None]  # [B, T] --> [B, T, W, H].
+
+        # Compute class-wise accuracy.
+        total_count = 0
+        num_classes = next_observation.shape[-1]
+        for i in range(num_classes):
+            count = np.sum((next_classes == i) * padding_mask)
+            total_count += count
+
+            class_accuracy = jnp.logical_and(correct_predictions, next_classes == i)
+            class_accuracy = class_accuracy * padding_mask
+            metrics[f"accuracy/{i}"] = jnp.sum(class_accuracy) / count
+            metrics[f"accuracy/count_{i}"] = count
+
+        # Compute the overall accuracy.
+        metrics["accuracy"] = jnp.sum(correct_predictions * padding_mask) / total_count
+        return metrics

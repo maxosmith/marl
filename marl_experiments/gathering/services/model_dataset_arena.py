@@ -5,8 +5,8 @@ from typing import Mapping, Optional
 import numpy as np
 
 from marl import _types, individuals, worlds
-from marl.rl.replay.reverb import adders as reverb_adders
 from marl.services.arenas import base
+from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import signals
 
 
@@ -25,10 +25,8 @@ class Arena(base.ArenaInterface):
 
     def run_episode(self):
         """Run one episode."""
-        print("EPISODE")
         timesteps = self.game.reset()
         states = {id: None for id in self.players.keys()}
-        self.reverb_adder.add(timestep=timesteps[0])
         length = 0
 
         while not np.any([ts.last() for ts in timesteps.values()]):
@@ -37,14 +35,23 @@ class Arena(base.ArenaInterface):
             for id, player in self.players.items():
                 actions[id], states[id] = player.step(timesteps[id], states[id])
 
-            # Environment transition.
-            timesteps = self.game.step(actions)
             self.reverb_adder.add(
                 timestep=timesteps[0],
-                action=actions[0],
+                action=np.asarray(actions[0], dtype=np.int32),
                 extras=np.array([actions[0], actions[1]], dtype=np.int32),
             )
+
+            # Environment transition.
+            timesteps = self.game.step(actions)
             length += 1
+
+        # Add the final timestep, with dummy action/extras.
+        self.reverb_adder.add(
+            timestep=timesteps[0],
+            action=np.zeros_like(actions[0], dtype=np.int32),
+            extras=np.zeros_like(np.array([actions[0], actions[1]], dtype=np.int32)),
+        )
+
         return dict(episode_length=length)
 
     def run(self, num_episodes: Optional[int] = None, num_timesteps: Optional[int] = None):

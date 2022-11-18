@@ -120,7 +120,7 @@ class EvaluationArena(base.ArenaInterface):
 
         # Get the current state of all learning agents.
         for agent in self._agents.values():
-            agent.sync_params()
+            agent.update()
 
         for scenario in self._scenarios:
             if scenario.name:

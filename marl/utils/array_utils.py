@@ -27,3 +27,8 @@ def zeros_like(x: Union[np.ndarray, int, float, np.number]):
         return np.zeros_like(x)
     else:
         raise ValueError(f"Input ({type(x)}) must be either a numpy array, an int, or a float.")
+
+
+def one_hot(x: np.ndarray, num_classes: int) -> np.ndarray:
+    """One-hot encodes an array."""
+    return np.eye(num_classes)[x]

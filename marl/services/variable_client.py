@@ -126,7 +126,6 @@ class VariableClient:
 
     def _callback(self, params_list: List[_types.Params]):
         """Place the parameters on the appropriate device when ready."""
-        logging.info(f"Synchronizing parameters: {self._key}.")
         if self._device and not isinstance(self._source, ReferenceVariableSource):
             # Move variables to a proper device.
             self._params = jax.device_put(params_list, self._device)

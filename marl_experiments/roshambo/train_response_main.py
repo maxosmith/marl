@@ -4,10 +4,11 @@ from typing import Optional
 import haiku as hk
 import launchpad as lp
 import numpy as np
+import ujson
 from absl import app
 from ml_collections import config_dict
 
-from marl import utils, worlds
+from marl import strategy, utils, worlds
 from marl.games import openspiel_proxy
 from marl_experiments.roshambo import roshambo_bot
 from marl_experiments.roshambo.utils import builders
@@ -22,59 +23,53 @@ def get_config() -> config_dict.ConfigDict:
     replay_table_name = "learner"
     sequence_length = 20
 
-    config = config_dict.ConfigDict(
-        dict(
-            result_dir="/scratch/wellman_root/wellman1/mxsmith/results/roshambo/test_br/",
-            seed=42,
-            impala=config_dict.ConfigDict(
-                dict(
-                    timestep_encoder_ctor="marl_experiments.roshambo.networks.MLPTimestepEncoder",
-                    timestep_encoder_kwargs=dict(),
-                    memory_core_ctor="marl_experiments.roshambo.networks.NoopCore",
-                    memory_core_kwargs=dict(),
-                    policy_head_ctor="marl_experiments.roshambo.networks.PolicyHead",
-                    policy_head_kwargs=dict(),
-                    value_head_ctor="marl_experiments.roshambo.networks.ValueHead",
-                    value_head_kwargs=dict(),
-                    discount=0.99,
-                    max_abs_reward=np.inf,
-                    baseline_cost=0.25,
-                    entropy_cost=0.01,
-                )
-            ),
-            learner=config_dict.ConfigDict(
-                dict(
-                    step_key=step_key,
-                    frame_key=frame_key,
-                    replay_table_name=replay_table_name,
-                    learning_rate=0.0003,
-                    max_gradient_norm=40,
-                    batch_size=64,
-                )
-            ),
-            replay=config_dict.ConfigDict(
-                dict(
-                    replay_table_name=replay_table_name,
-                    sequence_length=sequence_length,
-                    samples_per_insert=1.0,
-                    min_size_to_sample=1,
-                    max_times_sampled=1,
-                    error_buffer=100,
-                    replay_max_size=1_000_000,
-                )
-            ),
-            training_arena=config_dict.ConfigDict(
-                dict(
-                    replay_table_name=replay_table_name,
-                    sequence_length=sequence_length,
-                    variable_update_period=1_000,
-                    step_key=step_key,
-                    sequence_period=None,
-                )
-            ),
-            num_train_arenas=1,
-            evaluation_frequency=10_000,
-        )
+    config = config_dict.create(
+        result_dir="/scratch/wellman_root/wellman1/mxsmith/results/roshambo/test_br/",
+        seed=42,
+        # opponents=["rotatebot"],
+        opponents=roshambo_bot.ROSHAMBO_BOT_NAMES,
+        opponent_mixture=None,  # Default: uniform.
+        impala=config_dict.create(
+            timestep_encoder_ctor="marl_experiments.roshambo.networks.MLPTimestepEncoder",
+            timestep_encoder_kwargs=dict(),
+            memory_core_ctor="marl_experiments.roshambo.networks.MemoryCore",
+            memory_core_kwargs=dict(),
+            policy_head_ctor="marl_experiments.roshambo.networks.PolicyHead",
+            policy_head_kwargs=dict(),
+            value_head_ctor="marl_experiments.roshambo.networks.ValueHead",
+            value_head_kwargs=dict(),
+            discount=0.99,
+            max_abs_reward=np.inf,
+            baseline_cost=0.25,
+            entropy_cost=0.02,
+        ),
+        learner=config_dict.create(
+            step_key=step_key,
+            frame_key=frame_key,
+            replay_table_name=replay_table_name,
+            learning_rate_init=0.0003,
+            learning_rate_end=0.0,
+            learning_rate_steps=1_000_000,
+            max_gradient_norm=40,
+            batch_size=64,
+        ),
+        replay=config_dict.create(
+            replay_table_name=replay_table_name,
+            sequence_length=sequence_length,
+            samples_per_insert=1.0,
+            min_size_to_sample=1,
+            max_times_sampled=1,
+            error_buffer=100,
+            replay_max_size=1_000_000,
+        ),
+        training_arena=config_dict.create(
+            replay_table_name=replay_table_name,
+            sequence_length=sequence_length,
+            step_key=step_key,
+            sequence_period=None,
+        ),
+        num_train_arenas=1,
+        evaluation_frequency=100,
     )
     return config
 
@@ -92,13 +87,24 @@ def run(config: Optional[config_dict.ConfigDict] = None):
     """Train a response policy according to the experiment configuration."""
     if config is None:
         config = get_config()
+    if config.opponent_mixture is None:
+        # By default, if a mixture over opponent bots is not specified, we assume
+        # that the opponent is playing the uniform mixed strategy.
+        config.opponent_mixture = (np.ones_like(config.opponents, dtype=float) / len(config.opponents)).tolist()
+
     result_dir = utils.ResultDirectory(config.result_dir, overwrite=True, exist_ok=True)
+    ujson.dump(config.to_dict(), open(result_dir.file("config.json"), "w"))
     key_sequence = hk.PRNGSequence(config.seed)
 
     game = rps_utils.build_game()
     env_spec = game.spec()[0]
 
-    bots = {1: roshambo_bot.RoshamboBot(name="rotatebot")}
+    bots = {
+        1: strategy.Strategy(
+            policies=[roshambo_bot.RoshamboBot(name) for name in config.opponents],
+            mixture=np.asarray(config.opponent_mixture),
+        ),
+    }
 
     program = lp.Program(name="train_response")
 

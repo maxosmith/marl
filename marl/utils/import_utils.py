@@ -10,5 +10,5 @@ def str_to_class(path: str) -> Any:
     return getattr(module, name)
 
 
-def initialize(ctor_path, kwargs):
+def initialize(ctor_path, **kwargs):
     return str_to_class(ctor_path)(**kwargs)

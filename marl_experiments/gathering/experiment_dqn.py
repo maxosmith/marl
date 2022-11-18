@@ -11,13 +11,15 @@ import optax
 import reverb
 from absl import app, logging
 
-from marl import _types, bots, games, individuals, services, utils, worlds
+from marl import _types
+from marl import bots as bots_lib
+from marl import games, individuals, layouts, services, utils, worlds
 from marl.agents.dqn import dqn
 from marl.services import arenas, evaluation_policy
 from marl.services.arenas import training_arena
 from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import loggers, node_utils, signals, spec_utils, wrappers
-from marl_experiments.gathering import networks
+from marl_experiments.gathering import build_services, networks
 from marl_experiments.gathering.services import render_arena
 
 
@@ -31,13 +33,11 @@ class DQNConfig:
     discount: float = 0.99
     sequence_length: int = 20
     sequence_period: Optional[int] = None
-    variable_update_period: int = 1000
-    variable_client_key: str = "network"
     step_key: str = "update_steps"
     frame_key: str = "update_frames"
 
     # Topology.
-    num_training_arenas: int = 1
+    num_training_arenas: int = 4
 
     # Agent configuration.
     timestep_encoder_ctor: str = "marl_experiments.gathering.networks.MLPTimestepEncoder"
@@ -67,12 +67,11 @@ class DQNConfig:
     # Replay options.
     replay_table_name: str = reverb_adders.DEFAULT_PRIORITY_TABLE
     replay_max_size: int = 1_000_000
-    samples_per_insert: int = 4
-    min_size_to_sample: int = 1_000
+    samples_per_insert: int = 1.0
+    min_size_to_sample: int = 10_000
     max_times_sampled: int = 1
     error_buffer: int = 100
     num_prefetch_threads: Optional[int] = None
-    samples_per_insert: Optional[float] = float("inf")
     max_queue_size: int = 100
 
     # Evaluation.
@@ -91,7 +90,13 @@ class DQNConfig:
 
 
 def build_game():
-    game = games.Gathering(n_agents=2, map_name="default_small", global_observation=True)
+    game = games.Gathering(
+        n_agents=2,
+        map_name="default_small",
+        global_observation=False,
+        viewbox_width=10,
+        viewbox_depth=10,
+    )
     game = wrappers.TimeLimit(game, num_steps=100)
     return game
 
@@ -150,142 +155,6 @@ def build_computational_graphs(config: DQNConfig, env_spec: worlds.EnvironmentSp
     return train_policy, loss, initial_state, state_spec, eval_policy
 
 
-def build_reverb_node(config: DQNConfig, env_spec: worlds.EnvironmentSpec, state_spec: worlds.TreeSpec):
-    def _build_reverb_node(
-        env_spec: worlds.EnvironmentSpec, sequence_length: int, table_name: str
-    ) -> List[reverb.Table]:
-        signature = reverb_adders.SequenceAdder.signature(
-            env_spec,
-            state_spec,
-            sequence_length=sequence_length,
-        )
-        rate_limiter = reverb.rate_limiters.SampleToInsertRatio(
-            samples_per_insert=config.samples_per_insert,
-            min_size_to_sample=config.min_size_to_sample,
-            error_buffer=config.error_buffer,
-        )
-        replay_table = reverb.Table(
-            name=table_name,
-            sampler=reverb.selectors.Uniform(),
-            remover=reverb.selectors.Fifo(),
-            max_size=config.replay_max_size,
-            max_times_sampled=config.max_times_sampled,
-            rate_limiter=rate_limiter,
-            signature=signature,
-        )
-        return [replay_table]
-
-    build_reverb_node_fn = functools.partial(
-        _build_reverb_node,
-        env_spec=env_spec,
-        sequence_length=config.sequence_length,
-        table_name=config.replay_table_name,
-    )
-    return lp.ReverbNode(build_reverb_node_fn)
-
-
-@node_utils.build_courier_node
-def build_update_node(
-    config: DQNConfig,
-    random_key: jax.random.PRNGKey,
-    loss_graph: hk.Transformed,
-    reverb_handle: lp.CourierHandle,
-    counter_handle: lp.CourierHandle,
-    result_dir: utils.ResultDirectory,
-):
-    logger = loggers.LoggerManager(
-        loggers=[
-            loggers.TerminalLogger(time_frequency=5),
-            loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key),
-        ],
-        time_frequency=5,  # Seconds.
-    )
-    local_counter = services.Counter(parent=counter_handle)
-
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(config.max_gradient_norm),
-        optax.adam(
-            config.learning_rate,
-            b1=config.adam_momentum_decay,
-            b2=config.adam_variance_decay,
-            eps=config.adam_eps,
-            eps_root=config.adam_eps_root,
-        ),
-    )
-
-    data_iterator = services.ReverbPrefetchClient(
-        reverb_client=reverb_handle,
-        table_name=config.replay_table_name,
-        batch_size=config.batch_size,
-    )
-    return services.LearnerUpdate(
-        loss_fn=loss_graph,
-        optimizer=optimizer,
-        data_iterator=data_iterator,
-        logger=logger,
-        counter=local_counter,
-        step_key=config.step_key,
-        frame_key=config.frame_key,
-        random_key=random_key,
-    )
-
-
-@node_utils.build_courier_node(disable_run=False)
-def build_training_arena_node(
-    config: DQNConfig,
-    random_key: jax.random.PRNGKey,
-    policy_graph: hk.Transformed,
-    initial_state_graph: hk.Transformed,
-    reverb_handle: lp.CourierHandle,
-    learner_update_handle: lp.CourierHandle,
-    counter_handle: lp.CourierHandle,
-    game: worlds.Game,
-    players,
-    result_dir: utils.ResultDirectory,
-):
-    # NOTE: Currently LaunchPad does not support RPC methods receiving np.Arrays.
-    # Therefore, we cannot send TimeSteps over RPC, so instead each learner must
-    # be directly associated with a training arena.
-    #
-    # NOTE: That the last transition in the sequence is used for bootstrapping
-    # only and is ignored otherwise. So we need to make sure that sequences
-    # overlap on one transition, thus "-1" in the period length computation.
-    reverb_adder = reverb_adders.SequenceAdder(
-        client=reverb_handle,
-        priority_fns={config.replay_table_name: None},
-        period=config.sequence_period or (config.sequence_length - 1),
-        sequence_length=config.sequence_length,
-    )
-    # Variable client is responsible for syncing with the Updating node, but does not tell
-    # that node when it should update.
-    variable_source = services.VariableClient(
-        source=learner_update_handle,
-        key=config.variable_client_key,
-        update_period=config.variable_update_period,
-    )
-    policy = services.LearnerPolicy(
-        policy_fn=policy_graph,
-        initial_state_fn=initial_state_graph,
-        reverb_adder=reverb_adder,
-        variable_source=variable_source,
-        random_key=random_key,
-        backend="cpu",
-    )
-    local_counter = services.Counter(parent=counter_handle)
-
-    players[0] = policy
-
-    logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
-    train_arena = arenas.TrainingArena(
-        game=game,
-        players=players,
-        logger=logger,
-        counter=local_counter,
-        step_key=config.step_key,
-    )
-    return train_arena
-
-
 @node_utils.build_courier_node
 def build_snapshot_node(
     snapshot_template: services.Snapshot,
@@ -305,75 +174,6 @@ def build_counter_node():
     return services.Counter()
 
 
-@node_utils.build_courier_node
-def build_evaluation_arena_node(
-    config: DQNConfig,
-    policy_fn: hk.Transformed,
-    initial_state_fn: hk.Transformed,
-    random_key: jax.random.PRNGKey,
-    learner_update_handle: lp.CourierHandle,
-    opponents,
-    counter_handle: lp.CourierHandle,
-    result_dir: utils.ResultDirectory,
-):
-    variable_source = services.VariableClient(
-        source=learner_update_handle,
-        key=config.variable_client_key,
-    )
-    evaluation_policy = services.EvaluationPolicy(
-        policy_fn=policy_fn,
-        initial_state_fn=initial_state_fn,
-        variable_source=variable_source,
-        random_key=random_key,
-    )
-    logger = loggers.TensorboardLogger(result_dir.dir, step_key=config.step_key)
-    local_counter = services.Counter(parent=counter_handle)
-
-    return arenas.EvaluationArena(
-        agents={0: evaluation_policy},
-        bots=opponents,
-        scenarios=arenas.evaluation_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
-        evaluation_frequency=config.render_frequency,
-        counter=local_counter,
-        logger=logger,
-        step_key=config.step_key,
-    )
-
-
-@node_utils.build_courier_node
-def build_rendering_arena_node(
-    config: DQNConfig,
-    policy_fn: hk.Transformed,
-    initial_state_fn: hk.Transformed,
-    random_key: jax.random.PRNGKey,
-    learner_update_handle: lp.CourierHandle,
-    opponents,
-    counter_handle: lp.CourierHandle,
-    result_dir: utils.ResultDirectory,
-):
-    variable_source = services.VariableClient(
-        source=learner_update_handle,
-        key=config.variable_client_key,
-    )
-    evaluation_policy = services.EvaluationPolicy(
-        policy_fn=policy_fn,
-        initial_state_fn=initial_state_fn,
-        variable_source=variable_source,
-        random_key=random_key,
-    )
-    local_counter = services.Counter(parent=counter_handle)
-
-    return render_arena.EvaluationArena(
-        agents={0: evaluation_policy},
-        bots=opponents,
-        scenarios=render_arena.EvaluationScenario(game_ctor=build_game, num_episodes=5),
-        evaluation_frequency=config.render_frequency,
-        counter=local_counter,
-        step_key=config.step_key,
-        result_dir=result_dir,
-    )
-
-
 def run(config: Optional[DQNConfig] = None, exist_ok: bool = False, overwrite: bool = True):
     if not config:
         config = DQNConfig()
@@ -383,107 +183,56 @@ def run(config: Optional[DQNConfig] = None, exist_ok: bool = False, overwrite: b
     game = build_game()
     env_spec = spec_utils.make_game_specs(game)[0]
 
-    opponents = {1: bots.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec)}
+    bots = {1: bots_lib.ConstantIntAction(action=games.GatheringActions.NOOP.value, env_spec=env_spec)}
 
     program = lp.Program(name="experiment")
 
     # TODO(maxsmith): Configurable networks and ensure that this is captured in the snapshot.
     graphs = build_computational_graphs(config, env_spec)
-    train_policy_graph, loss_graph, initial_state_graph, state_spec, eval_policy_graph = graphs
+    train_policy, loss, initial_state, state_spec, eval_policy = graphs
     snapshot_template = services.Snapshot(
         ctor=build_computational_graphs, ctor_kwargs=dict(config=config, env_spec=env_spec)
     )
 
-    with program.group("counter"):
-        counter_handle = program.add_node(build_counter_node())
-
-    with program.group("reverb"):
-        reverb_handle = program.add_node(build_reverb_node(config, env_spec, state_spec))
-
-    with program.group("learner_update"):
-        random_key, subkey = jax.random.split(random_key)
-        learner_update_handle = program.add_node(
-            build_update_node(
-                config,
-                subkey,
-                loss_graph,
-                reverb_handle,
-                counter_handle,
-                result_dir.make_subdir(program._current_group),
-            )
+    # Build partial constructors for all of the program nodes, excluding the handles to other nodes.
+    # The handles will be provided by kwargs during program layout.
+    replay_ctor = functools.partial(
+        build_services.build_reverb_node,
+        config=config,
+        env_spec=env_spec,
+        state_and_extra_spec=state_spec,
+    )
+    learner_ctor = functools.partial(build_services.build_learner_node, config=config, loss_graph=loss)
+    train_arena_ctor = functools.partial(
+        build_services.build_training_arena_node,
+        config=config,
+        policy_graph=train_policy,
+        initial_state_graph=initial_state,
+        game=game,
+        bots=bots,
+    )
+    eval_arena_ctors = []
+    eval_arena_ctors.append(
+        functools.partial(
+            build_services.build_evaluation_arena_node,
+            config=config,
+            policy_graph=eval_policy,
+            initial_state_graph=initial_state,
+            bots=bots,
+            game_ctor=build_game,
         )
+    )
 
-    with program.group("training_arena"):
-
-        for node_i in range(config.num_training_arenas):
-            node_name = f"{program._current_group}_{node_i}"
-            random_key, subkey = jax.random.split(random_key)
-
-            program.add_node(
-                build_training_arena_node(
-                    config,
-                    subkey,
-                    train_policy_graph,
-                    initial_state_graph,
-                    reverb_handle,
-                    learner_update_handle,
-                    counter_handle,
-                    game,
-                    opponents,
-                    result_dir.make_subdir(node_name),
-                )
-            )
-
-    with program.group("evaluation_arena"):
-        # Policy evaluation.
-        random_key, subkey = jax.random.split(random_key)
-        evaluation_node = build_evaluation_arena_node(
-            config,
-            train_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            result_dir.make_subdir(program._current_group),
-        )
-
-        # Training rendering.
-        train_name = f"{program._current_group}_render_train"
-        random_key, subkey = jax.random.split(random_key)
-        train_render_node = build_rendering_arena_node(
-            config,
-            train_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            result_dir.make_subdir(train_name),
-        )
-
-        # Evaluation rendering.
-        eval_name = f"{program._current_group}_render_eval"
-        random_key, subkey = jax.random.split(random_key)
-        eval_render_node = build_rendering_arena_node(
-            config,
-            eval_policy_graph,
-            initial_state_graph,
-            subkey,
-            learner_update_handle,
-            opponents,
-            counter_handle,
-            result_dir.make_subdir(eval_name),
-        )
-
-        program.add_node(lp.MultiThreadingColocation([evaluation_node, train_render_node, eval_render_node]))
-
-    with program.group("saver"):
-        program.add_node(
-            build_snapshot_node(
-                snapshot_template, learner_update_handle, result_dir.make_subdir(program._current_group)
-            )
-        )
+    program = layouts.build_distributed_training_program(
+        program=program,
+        counter_ctor=build_counter_node,
+        replay_ctor=replay_ctor,
+        learner_ctor=learner_ctor,
+        train_arena_ctor=train_arena_ctor,
+        eval_arena_ctors=eval_arena_ctors,
+        result_dir=result_dir,
+        seed=config.seed,
+    )
 
     lp.launch(
         program,

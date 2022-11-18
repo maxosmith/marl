@@ -5,13 +5,13 @@ import haiku as hk
 import jax
 from absl import logging
 
-from marl import _types, worlds
+from marl import _types, individuals, worlds
 from marl.services import interfaces
 from marl.services.replay.reverb.adders import reverb_adder
 from marl.utils import tree_utils
 
 
-class LearnerPolicy:
+class LearnerPolicy(individuals.Agent):
     """Service providing a learner's policy/step function."""
 
     def __init__(
@@ -22,7 +22,7 @@ class LearnerPolicy:
         random_key: jax.random.KeyArray,
         reverb_adder: Optional[reverb_adder.ReverbAdder] = None,
         backend: Optional[str] = "cpu",
-        per_episode_update: bool = False,
+        per_episode_update: bool = True,
     ):
         """Initializes an actor.
 
@@ -47,9 +47,6 @@ class LearnerPolicy:
         action = tree_utils.to_numpy(action)
         if self._reverb_adder:
             self._reverb_adder.add(timestep=timestep, action=action, extras=new_state)
-        if not self._per_episode_update:
-            # Maybe update variables with the latest copy from the updater.
-            self._variable_source.update(wait=False)
         return action, new_state
 
     def episode_reset(self, timestep: worlds.TimeStep):
@@ -59,11 +56,8 @@ class LearnerPolicy:
         # Start a new episode in the replay buffer.
         if not timestep.first():
             raise ValueError("Reset must be called after the first timestep.")
-        # Maybe update variables with the latest copy from the updater.
-        if self._per_episode_update:
-            self._variable_source.update_and_wait()
         return state
 
-    def sync_params(self):
+    def update(self):
         """Force the learner to synchronize its parameters with its variable source."""
         self._variable_source.update_and_wait()
