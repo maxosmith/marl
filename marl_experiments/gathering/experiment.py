@@ -1,6 +1,6 @@
-import dataclasses
+"""Train a best-response policy using IMPALA."""
 import functools
-from typing import Any, Mapping, Optional
+from typing import Optional
 
 import haiku as hk
 import jax
@@ -93,6 +93,7 @@ def validate_config(config: config_dict.ConfigDict):
 
 
 def build_game():
+    """Game factory function."""
     game = games.Gathering(
         n_agents=2,
         map_name="default_small",
@@ -126,6 +127,7 @@ def build_rendering_arena_node(
     counter: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ):
+    """Builds a node that periodically renders trajectories to disk."""
     variable_source = services.VariableClient(
         source=learner,
         key=config.variable_client_key,
@@ -150,6 +152,7 @@ def build_rendering_arena_node(
 
 
 def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False, overwrite: bool = True):
+    """Run the experiment."""
     # Load the experiment's config.
     if not config:
         config = get_config()
@@ -228,26 +231,28 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
     )
 
     # Add additional nodes to the program.
-    with program.group("steps_limiter"):
-        program.add_node(
+    with program.group("extras"):
+        extra_nodes = []
+        extra_nodes.append(
             build_steps_limiter(
                 counter=program.groups["counter"][0].create_handle(),
                 max_steps=config.max_steps,
                 step_key=config.step_key,
             )
         )
+        extra_nodes.append(
+            build_services.build_snapshot_node(
+                snapshot_template=snapshot_template,
+                learner_update_handle=program.groups["learner"][0],
+                result_dir=result_dir.make_subdir(program._current_group),
+            )
+        )
 
-    # with program.group("saver"):
-    #     program.add_node(
-    #         impala.build_snapshot_node(
-    #             snapshot_template, learner_update_handle, result_dir.make_subdir(program._current_group)
-    #         )
-    #     )
+        program.add_node(lp.MultiThreadingColocation(extra_nodes))
 
     lp.launch(
         program,
         launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING,
-        # launch_type=lp.LaunchType.LOCAL_MULTI_THREADING,
         terminal="current_terminal",
     )
 
