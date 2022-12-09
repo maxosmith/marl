@@ -16,8 +16,12 @@ class Individual(abc.ABC):
         """Resets the agent's episodic state."""
 
 
-# Prefer to use `Bot` to describe non-learning `Individual`s.
-Bot = Individual
+class Bot(Individual):
+    """Non-learning individual."""
+
+    def update(self) -> None:
+        """Maybe update the agent's internal parameters."""
+        pass
 
 
 class Agent(Individual):

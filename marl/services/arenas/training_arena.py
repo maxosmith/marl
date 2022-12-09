@@ -58,8 +58,8 @@ class TrainingArena(base.ArenaInterface):
     """
 
     game: worlds.Game
-    players: Mapping[_types.PlayerID, individuals.Individual]
     logger: loggers.Logger
+    players: Optional[Mapping[_types.PlayerID, individuals.Individual]] = None
     counter: Optional[counter_lib.Counter] = None
     step_key: Optional[str] = None
 
@@ -69,13 +69,17 @@ class TrainingArena(base.ArenaInterface):
         if self.step_key and not self.counter:
             raise ValueError("Must specify counter with step key.")
 
+        self._stop = True
+
     def run_episode(self) -> EpisodeResult:
         """Run one episode."""
+
         episode_length = 0
         episode_return = spec_utils.zeros_from_spec(self.game.reward_specs())
         stopwatch = utils.Stopwatch()
 
         stopwatch.start(_StopwatchKeys.UPDATE.value)
+
         self._maybe_sychronize_agent_parameters()
         stopwatch.stop(_StopwatchKeys.UPDATE.value)
 
@@ -116,7 +120,12 @@ class TrainingArena(base.ArenaInterface):
             steps_per_second=times[_StopwatchKeys.STEP.value],
         )
 
-    def run(self, num_episodes: Optional[int] = None, num_timesteps: Optional[int] = None):
+    def run(
+        self,
+        num_episodes: Optional[int] = None,
+        num_timesteps: Optional[int] = None,
+        players: Optional[Mapping[_types.PlayerID, individuals.Individual]] = None,
+    ):
         """Runs many episodes serially.
 
         Runs either `num_episodes` or at least `num_timesteps` timesteps (episodes are run until completion,
@@ -126,9 +135,20 @@ class TrainingArena(base.ArenaInterface):
         Args:
             num_episodes: number of episodes to run.
             num_timesteps: minimum number of timesteps to run.
+            players: individuals to play the game. These may be specified at instantiation of the arena for fixed
+                players, or dynamically specified through this argument.
         """
         if not (num_episodes is None or num_timesteps is None):
             warnings.warn("Neither `num_episodes` nor `num_timesteps` were specified, running indefinitely.")
+        if players and self.players:
+            raise ValueError("Cannot override players for an arena with fixed players.")
+        if not self.players and not players:
+            raise ValueError("Must specify players for an arena without fixed players.")
+
+        logging.info("Running training arena.")
+
+        if players:
+            self.players = players
 
         def _should_terminate(episodes: int, timesteps: int) -> bool:
             episodes_finished = (num_episodes is not None) and (episodes >= num_episodes)
@@ -136,6 +156,7 @@ class TrainingArena(base.ArenaInterface):
             return episodes_finished or timesteps_finished
 
         episode_count, timestep_count = 0, 0
+        self._stop = False
         stopwatch = utils.Stopwatch(buffer_size=100)
 
         with signals.runtime_terminator():
@@ -153,6 +174,18 @@ class TrainingArena(base.ArenaInterface):
                 if self.counter:
                     logdata[self.step_key] = self.counter.get_counts().get(self.step_key, 0)
                 self.logger.write(logdata)
+
+                if self._stop:
+                    logging.info("Run stopped.")
+                    break
+
+        if players:
+            self.players = None
+
+    def stop(self):
+        """Stop running this service."""
+        logging.info("Stopping training arena.")
+        self._stop = True
 
     def _maybe_sychronize_agent_parameters(self):
         for player in self.players.values():

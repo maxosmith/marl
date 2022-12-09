@@ -10,7 +10,7 @@ from marl.utils import signals
 class StepsLimiter:
     """Process that terminates an experiment when `max_steps` is reached."""
 
-    def __init__(self, counter: lp.CourierHandle, max_steps: int, step_key: str = "actor_steps"):
+    def __init__(self, counter: Counter, max_steps: int, step_key: str = "actor_steps"):
         """Initializes an instance of a StepsLimiter.
 
         Args:
@@ -20,7 +20,7 @@ class StepsLimiter:
                 at every value. Instead, we terminate the program whenver this threshold is crossed.
             step_key: Key associated with the limited step maintained by the counter.
         """
-        self._counter = Counter(parent=counter)
+        self._counter = counter
         self._max_steps = max_steps
         self._step_key = step_key
 
@@ -36,7 +36,7 @@ class StepsLimiter:
 
                 logging.info("StepsLimiter: Reached %d recorded steps", num_steps)
 
-                if num_steps > self._max_steps:
+                if num_steps >= self._max_steps:
                     logging.info("StepsLimiter: Max steps of %d was reached, terminating", self._max_steps)
                     lp.stop()
 

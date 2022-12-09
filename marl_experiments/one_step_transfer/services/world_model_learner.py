@@ -3,19 +3,28 @@
 References:
  - https://github.com/deepmind/acme/blob/77fb814eba749946a3e31ac2cb70f5ec4c9bff3c/acme/agents/jax/impala/learning.py
 """
+import enum
 import itertools
 from typing import NamedTuple, Optional, Sequence
 
 import haiku as hk
 import jax
+import numpy as np
 import optax
 import reverb
 import tree
 from absl import logging
 
-from marl import _types, services
+from marl import _types, services, utils
 from marl.services import counter as counter_lib
 from marl.utils import distributed_utils, loggers
+
+
+class _StopwatchKeys(enum.Enum):
+    """Keys used by the stopwatch to measure the walltime for subroutines."""
+
+    FETCH = "fetch"
+    UPDATE = "update"
 
 
 class TrainingState(NamedTuple):
@@ -25,7 +34,7 @@ class TrainingState(NamedTuple):
     opt_state: optax.OptState
 
 
-class LearnerUpdate:
+class WorldModelLearner:
     """Service providing a learner's policy/step function."""
 
     _PMAP_AXIS_NAME = "data"
@@ -86,28 +95,39 @@ class LearnerUpdate:
         """Run the update loop; typically an infinite loop which calls step."""
         iterator = range(num_steps) if num_steps is not None else itertools.count()
 
+        if num_steps:
+            logging.info("Running learner for %d steps.", num_steps)
+        else:
+            logging.info("Running learner indefinitely.")
+
         for _ in iterator:
             self.step()
 
     def step(self):
         """Perform a single update step."""
+        stopwatch = utils.Stopwatch()
+
+        stopwatch.start(_StopwatchKeys.FETCH.value)
         reverb_sample = next(self._data_iterator)
         # Remove device dimension that was added by the prefetch client.
         reverb_sample = tree.map_structure(lambda x: x[0], reverb_sample)
+        stopwatch.stop(_StopwatchKeys.FETCH.value)
 
+        stopwatch.start(_StopwatchKeys.UPDATE.value)
         self._state, metrics = self._update_step(
             params=self._state.params,
             rng=self._random_key,
             opt_state=self._state.opt_state,
             sample=reverb_sample.data,
         )
+        stopwatch.stop(_StopwatchKeys.UPDATE.value)
+
+        times = stopwatch.get_splits(aggregate_fn=np.mean)
+        metrics[f"times/{_StopwatchKeys.FETCH.value}"] = times[_StopwatchKeys.FETCH.value]
+        metrics[f"times/{_StopwatchKeys.UPDATE.value}"] = times[_StopwatchKeys.UPDATE.value]
 
         if self._counter:
-            counts = self._counter.increment(
-                **{
-                    self._step_key: 1,
-                }
-            )
+            counts = self._counter.increment(**{self._step_key: 1})
             metrics[self._step_key] = counts[self._step_key]
 
         if self._logger:

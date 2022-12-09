@@ -8,6 +8,7 @@ import launchpad as lp
 import numpy as np
 import optax
 import reverb
+import tree
 from absl import app, logging
 
 from marl import bots, games, services, utils, worlds
@@ -15,8 +16,9 @@ from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import loggers, node_utils, spec_utils, wrappers
 from marl.utils.loggers import terminal as terminal_logger_lib
 from marl_experiments.gathering import networks
-from marl_experiments.gathering.services import model_dataset_arena, supervised_learning
+from marl_experiments.gathering.services import model_dataset_arena
 from marl_experiments.gathering.world_model import WorldModel
+from marl_experiments.one_step_transfer.services import world_model_learner
 
 
 @dataclasses.dataclass
@@ -29,7 +31,7 @@ class ModelTrainConfig:
     seed: int = 42
 
     replay_table_name = "world"
-    replay_max_size = 1_000_000
+    replay_max_size = 1_000
     sequence_length: int = 20
     sequence_period: Optional[int] = None
 
@@ -48,18 +50,19 @@ class ModelTrainConfig:
 
 def build_computational_graphs(config: ModelTrainConfig, env_spec: worlds.EnvironmentSpec):
     dummy_input = dict(
-        world_state=spec_utils.zeros_from_spec(env_spec.observation),
-        actions=np.zeros([2], dtype=np.int32),
+        world_state={0: spec_utils.zeros_from_spec(env_spec), 1: spec_utils.zeros_from_spec(env_spec)},
+        actions={0: np.zeros((), dtype=np.int32), 1: np.zeros((), dtype=np.int32)},
     )
 
     def _world_model_graphs():
         world_model = WorldModel(
+            num_players=2,
             state_shape=env_spec.observation.shape,
             input_encoder=networks.WorldStateLinearEncoder(
                 state_shape=env_spec.observation.shape, num_actions=env_spec.action.num_values
             ),
             memory_core=networks.MemoryCore(),
-            state_prediction_head=networks.WorldStateLinearPredictionHead(state_shape=env_spec.observation.shape),
+            observation_prediction_head=networks.WorldStateLinearPredictionHead(state_shape=env_spec.observation.shape),
             reward_prediction_head=networks.RewardPredictionHead(),
             reward_cost=config.reward_cost,
             evaluation=True,
@@ -79,9 +82,12 @@ def build_computational_graphs(config: ModelTrainConfig, env_spec: worlds.Enviro
 
 def build_reverb_node(config: ModelTrainConfig, env_spec: worlds.EnvironmentSpec):
     def _build_reverb_node(env_spec: worlds.EnvironmentSpec, table_name: str) -> List[reverb.Table]:
+        # Stack all players' timesteps.
+        env_spec = tree.map_structure(
+            lambda x: worlds.ArraySpec(shape=(2,) + x.shape, dtype=x.dtype, name=x.name), env_spec
+        )
         signature = signature = reverb_adders.SequenceAdder.signature(
             environment_spec=env_spec,
-            extras_spec=worlds.ArraySpec(shape=(2,), dtype=np.int32),
             sequence_length=config.sequence_length,
         )
         rate_limiter = reverb.rate_limiters.MinSize(1)
@@ -151,7 +157,7 @@ def build_update_node(
         table_name=config.replay_table_name,
         batch_size=config.batch_size,
     )
-    return supervised_learning.LearnerUpdate(
+    return world_model_learner.LearnerUpdate(
         loss_fn=loss_graph,
         optimizer=optimizer,
         data_iterator=data_iterator,
@@ -209,7 +215,7 @@ def main(_):
             )
         )
 
-    lp.launch(program, launch_type=lp.LaunchType.LOCAL_MULTI_THREADING, serialize_py_nodes=False)
+    lp.launch(program, launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING, terminal="current_terminal")
 
     logging.info("Generating dataset...")
     arena_client = arena_handle.dereference()
@@ -217,7 +223,8 @@ def main(_):
     logging.info("Dataset created.")
 
     train_client = train_handle.dereference()
-    while True:
+    # while True:
+    for _ in range(10):
         train_client.step()
 
 

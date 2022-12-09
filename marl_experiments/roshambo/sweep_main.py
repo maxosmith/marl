@@ -47,6 +47,16 @@ def sweep_bc_ps() -> Tuple[hyper.Sweep, str]:
     return sweep, _BC_MAIN
 
 
+def sweep_bc_ms() -> Tuple[hyper.Sweep, str]:
+    """Perform behavioural cloning on for each agent, playing against the population."""
+    sweep = hyper.product(
+        [
+            hyper.sweep("bot_names", [roshambo_bot.ROSHAMBO_BOT_NAMES]),
+        ]
+    )
+    return sweep, _BC_MAIN
+
+
 # ========================================================================================
 
 # Registers each sweep function to be accessible through a command line flag.
@@ -54,6 +64,7 @@ _SWEEPS = {
     "br_ps": sweep_br_ps,
     "br_ms": sweep_br_ms,
     "bc_ps": sweep_bc_ps,
+    "bc_ms": sweep_bc_ms,
 }
 
 

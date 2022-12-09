@@ -202,9 +202,8 @@ class IMPALA(hk.RNNCore):
         metrics["batch_size"] = actions.shape[0]
 
         # Log the average policy to monitor distribution collapse.
-        policy = distrax.Softmax(logits=logits).probs
+        policy = jax.nn.softmax(logits)
         metrics["policy_most_likely_action"] = jnp.mean(jnp.max(policy, axis=-1))
-        policy = jnp.mean(policy, axis=[0, 1])  # [B, T, A] --> [A].
         metrics["policy"] = policy
 
         # Log the average values across the sequence.

@@ -6,6 +6,7 @@ import threading
 from typing import Any, Callable, Optional
 
 import launchpad
+from absl import logging
 
 _Handler = Callable[[], Any]
 
@@ -26,6 +27,7 @@ def runtime_terminator(callback: Optional[_Handler] = None):
     worker_id = threading.get_ident()
 
     def signal_handler():
+        logging.info("Received termination signal.")
         if callback:
             callback()
         res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(worker_id), ctypes.py_object(SystemExit))

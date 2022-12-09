@@ -2,6 +2,7 @@
 import dataclasses
 import operator
 import time
+import warnings
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence, Union
 
 import numpy as np
@@ -68,6 +69,7 @@ class EvaluationArena(base.ArenaInterface):
         evaluation_frequency: int,
         counter: counter_lib.Counter,
         logger: loggers.Logger,
+        snapshotter: Optional[services.PrioritySnapshotter],
         step_key: str,
     ):
         self._agents = agents
@@ -78,8 +80,10 @@ class EvaluationArena(base.ArenaInterface):
         self._evaluation_frequency = evaluation_frequency
         self._counter = counter
         self._logger = logger
+        self._snapshotter = snapshotter
         self._step_key = step_key
         self._last_eval = -np.inf
+        self._stop = False
 
     def run_episode(self, game: worlds.Game, players: Mapping[_types.PlayerID, _types.Individual]) -> EpisodeResult:
         """Run one episode."""
@@ -110,7 +114,7 @@ class EvaluationArena(base.ArenaInterface):
         for agent in self._agents.values():
             agent.update()
 
-        for scenario in self._scenarios:
+        for scenario_i, scenario in enumerate(self._scenarios):
             if scenario.name:
                 logging.info(f"\tRunning scenario: {scenario.name}")
 
@@ -129,11 +133,18 @@ class EvaluationArena(base.ArenaInterface):
                 results = dict_utils.prefix_keys(results, scenario.name)
             self._logger.write(results)
 
+            if self._snapshotter and (scenario_i == 0):
+                warnings.warn("Currently snapshotter only applies to Player 0 on the first scenario.")
+                self._snapshotter.save(results["eval_return/0"], self._agents[0].params)
+
         logging.info("Evaluation complete.")
 
     def run(self):
         with signals.runtime_terminator():
             while True:
+                if self._stop:
+                    break
+
                 # Check the current step.
                 counts = self._counter.get_counts()
                 step = counts.get(self._step_key, 0)
@@ -147,3 +158,8 @@ class EvaluationArena(base.ArenaInterface):
                     # Do not sleep for a long period of time to avoid LaunchPad program
                     # termination hangs (time.sleep is not interruptible).
                     time.sleep(1)
+
+    def stop(self):
+        """Stop running this service."""
+        logging.info("Stopping training arena.")
+        self._stop = True

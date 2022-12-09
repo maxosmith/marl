@@ -3,6 +3,7 @@ import warnings
 from typing import Mapping, Optional
 
 import numpy as np
+import tree
 
 from marl import _types, individuals, worlds
 from marl.services.arenas import base
@@ -23,6 +24,9 @@ class Arena(base.ArenaInterface):
     players: Mapping[_types.PlayerID, individuals.Individual]
     reverb_adder: reverb_adders.SequenceAdder
 
+    def __post_init__(self):
+        self._stop = False
+
     def run_episode(self):
         """Run one episode."""
         timesteps = self.game.reset()
@@ -35,10 +39,12 @@ class Arena(base.ArenaInterface):
             for id, player in self.players.items():
                 actions[id], states[id] = player.step(timesteps[id], states[id])
 
+            stacked_timesteps = tree.map_structure(lambda *args: np.stack(args, axis=0), *timesteps.values())
+            stacked_timesteps = stacked_timesteps._replace(step_type=stacked_timesteps.step_type[0])
+
             self.reverb_adder.add(
-                timestep=timesteps[0],
-                action=np.asarray(actions[0], dtype=np.int32),
-                extras=np.array([actions[0], actions[1]], dtype=np.int32),
+                timestep=stacked_timesteps,
+                action=np.array([actions[0], actions[1]], dtype=np.int32),
             )
 
             # Environment transition.
@@ -46,10 +52,11 @@ class Arena(base.ArenaInterface):
             length += 1
 
         # Add the final timestep, with dummy action/extras.
+        stacked_timesteps = tree.map_structure(lambda *args: np.stack(args, axis=0), *timesteps.values())
+        stacked_timesteps = stacked_timesteps._replace(step_type=stacked_timesteps.step_type[0])
         self.reverb_adder.add(
-            timestep=timesteps[0],
-            action=np.zeros_like(actions[0], dtype=np.int32),
-            extras=np.zeros_like(np.array([actions[0], actions[1]], dtype=np.int32)),
+            timestep=stacked_timesteps,
+            action=np.zeros_like(np.array([actions[0], actions[1]], dtype=np.int32)),
         )
 
         return dict(episode_length=length)
@@ -74,9 +81,21 @@ class Arena(base.ArenaInterface):
             return episodes_finished or timesteps_finished
 
         episode_count, timestep_count = 0, 0
+        self._stop = False
+
+        # Get the current state of all learning agents.
+        for agent in self.players.values():
+            agent.update()
 
         with signals.runtime_terminator():
             while not _should_terminate(episodes=episode_count, timesteps=timestep_count):
                 result = self.run_episode()
                 episode_count += 1
                 timestep_count += result["episode_length"]
+
+                if self._stop:
+                    break
+
+    def stop(self):
+        """Stop running this service."""
+        self._stop = True

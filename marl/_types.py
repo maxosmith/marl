@@ -10,6 +10,7 @@ from typing import Any, Mapping, NamedTuple
 import chex
 
 PlayerID = int
+PolicyID = int
 # TODO(maxsmith): Move individual into an interface.
 Individual = Any
 

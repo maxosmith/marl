@@ -221,7 +221,21 @@ class SequenceAdder(reverb_adder.ReverbAdder):
         # Create a prioritized item for each table.
         for table_name, priority in table_priorities.items():
             self._writer.create_item(table_name, priority, trajectory)
+            # Timeout in case the write-destination is dead.
+            # self._non_blocking_flush()
             self._writer.flush(self._max_in_flight_items)
+
+    # def _non_blocking_flush(self):
+    #     flush_pending = True
+    #     while flush_pending:
+    #         try:
+    #             self._writer._writer.Flush(self._max_in_flight_items, 1_000)
+    #         except Exception as _:
+    #             # An error is thrown when we are unable to flush.
+    #             pass
+    #         else:
+    #             # Without error means the write was successful.
+    #             flush_pending = False
 
     # TODO(bshahr): make this into a standalone method. Class methods should be
     # used as alternative constructors or when modifying some global state,

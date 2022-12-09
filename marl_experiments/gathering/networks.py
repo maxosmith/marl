@@ -149,7 +149,7 @@ class WorldStateConvPredictionHead(hk.Module):
 
 
 class WorldStateLinearEncoder(hk.Module):
-    """World model input encoder for global-state with joint-actions."""
+    """World model input encoder for observation and prev-action pairs."""
 
     def __init__(self, state_shape: Tuple[int], num_actions: int, name: Optional[str] = "input_encoder"):
         super().__init__(name=name)
@@ -158,10 +158,10 @@ class WorldStateLinearEncoder(hk.Module):
         final_output_shape = np.prod(self._state_shape)
         self._net = hk.nets.MLP([final_output_shape, int(final_output_shape / 2), int(final_output_shape / 2)])
 
-    def __call__(self, world_state: _types.Tree, actions: _types.PlayerIDToAction) -> _types.Tree:
+    def __call__(self, world_state: _types.Tree, action: _types.Array) -> _types.Tree:
         world_state = hk.Flatten(preserve_dims=-3)(world_state)
-        actions = hk.Flatten(preserve_dims=-2)(jax.nn.one_hot(actions, self._num_actions))
-        inputs = jnp.concatenate([world_state, actions], axis=-1)
+        action = jax.nn.one_hot(action, self._num_actions)
+        inputs = jnp.concatenate([world_state, action], axis=-1)
         return self._net(inputs)
 
 
@@ -170,7 +170,7 @@ class WorldStateLinearPredictionHead(hk.Module):
         super().__init__(name=name)
         self._state_shape = state_shape
         final_output_shape = np.prod(self._state_shape)
-        self._net = hk.nets.MLP([int(final_output_shape / 2), int(final_output_shape / 2), final_output_shape])
+        self._net = hk.nets.MLP([int(final_output_shape / 2), final_output_shape])
 
     def __call__(self, x: _types.Tree) -> _types.Tree:
         x = self._net(x)
@@ -181,7 +181,7 @@ class WorldStateLinearPredictionHead(hk.Module):
 class RewardPredictionHead(hk.Module):
     def __init__(self, name: Optional[str] = "reward_prediction_head"):
         super().__init__(name=name)
-        self._net = hk.nets.MLP([256, 128, 32, 1])
+        self._net = hk.Linear(1)
 
     def __call__(self, x: _types.Tree) -> _types.Tree:
-        return self._net(x)
+        return jnp.squeeze(self._net(x), axis=-1)

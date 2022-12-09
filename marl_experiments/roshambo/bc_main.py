@@ -5,7 +5,8 @@ import haiku as hk
 import numpy as np
 import optax
 import tree
-from absl import app
+import ujson
+from absl import app, logging
 from ml_collections import config_dict
 from torch.utils.data import DataLoader
 
@@ -26,7 +27,7 @@ def get_config() -> config_dict.ConfigDict:
         # Constructor arguments for a `BCDataset`.
         dataset_config=config_dict.create(
             path="/scratch/wellman_root/wellman1/mxsmith/data/roshambo/demonstrations2.zarr",
-            bot_names=["rotatebot"],
+            bot_names=["pibot"],
             # Opponent names are assumed the same as the bots when set as None.
             opponent_names=roshambo_bot.ROSHAMBO_BOT_NAMES,
             sequence_len=20,
@@ -35,7 +36,7 @@ def get_config() -> config_dict.ConfigDict:
         dataloader_config=config_dict.create(
             batch_size=64,
             shuffle=True,
-            num_workers=4,
+            num_workers=0,
         ),
         optimizer=config_dict.create(
             learning_rate=0.003,
@@ -92,6 +93,8 @@ def run(config: Optional[config_dict.ConfigDict] = None):
         config = get_config()
     key_sequence = hk.PRNGSequence(config.seed)
     result_dir = utils.ResultDirectory(config.result_dir, overwrite=True, exist_ok=True)
+    ujson.dump(config.to_dict(), open(result_dir.file("config.json"), "w"))
+    logging.info("Experiment's configuration:\n %s", config)
 
     dataloader = build_dataloader(config.dataset_config, config.dataloader_config)
 
