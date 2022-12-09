@@ -10,15 +10,12 @@ import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 import reverb
-import tree
 from absl import logging
 
-from marl import _types, services
+from marl import _types
 from marl.services import counter as counter_lib
-from marl.services.replay.reverb.adders import utils as reverb_utils
 from marl.utils import distributed_utils, loggers
 
 
@@ -27,6 +24,7 @@ class TrainingState(NamedTuple):
 
     params: _types.Params
     opt_state: optax.OptState
+    rng_key: jax.random.PRNGKeyArray
 
 
 class LearnerUpdate:
@@ -38,7 +36,7 @@ class LearnerUpdate:
         self,
         loss_fn: hk.Transformed,
         optimizer: optax.GradientTransformation,
-        random_key: jax.random.KeyArray,
+        random_key: jax.random.PRNGKeyArray,
         data_iterator: Sequence[reverb.ReplaySample],
         devices: Optional[Sequence[jax.xla.Device]] = None,
         logger: Optional[loggers.Logger] = None,
@@ -84,9 +82,11 @@ class LearnerUpdate:
             sample: reverb.ReplaySample,
         ):
             """Computes and applies an update step on the learner's parameters."""
+            rng_key, subkey = jax.random.split(rng)
+
             # Compute gradients.
             grad_fn = jax.value_and_grad(loss_fn.apply, has_aux=True)
-            (_, metrics), gradients = grad_fn(params, rng, sample)
+            (_, metrics), gradients = grad_fn(params, subkey, sample)
 
             # Average gradients over pmap replicas before optimizer update.
             gradients = jax.lax.pmean(gradients, axis_name=LearnerUpdate._PMAP_AXIS_NAME)
@@ -107,7 +107,7 @@ class LearnerUpdate:
             if "policy" in metrics:
                 del metrics["policy"]
 
-            new_state = TrainingState(params=new_params, opt_state=new_opt_state)
+            new_state = TrainingState(params=new_params, opt_state=new_opt_state, rng_key=rng_key)
             return new_state, metrics
 
         @jax.jit
@@ -117,6 +117,7 @@ class LearnerUpdate:
             rng: jax.random.PRNGKey,
             sample: reverb.ReplaySample,
         ):
+            """Measures the a policys convergence through its difference across updates."""
             _, metrics = loss_fn.apply(params, rng, sample)
             _, prev_metrics = loss_fn.apply(prev_params, rng, sample)
 
@@ -130,11 +131,11 @@ class LearnerUpdate:
             _policy_convergence, axis_name=LearnerUpdate._PMAP_AXIS_NAME, devices=self._devices
         )
 
-        params = loss_fn.init(random_key)
+        random_key, subkey = jax.random.split(random_key)
+        params = loss_fn.init(subkey)
         opt_state = optimizer.init(params)
-        self._state = TrainingState(params=params, opt_state=opt_state)
+        self._state = TrainingState(params=params, opt_state=opt_state, rng_key=random_key)
         self._state = distributed_utils.replicate_on_all_devices(self._state, self._local_devices)
-        self._random_key = distributed_utils.replicate_on_all_devices(random_key, self._local_devices)
 
     def run(self, num_steps: Optional[int] = None) -> None:
         """Run the update loop; typically an infinite loop which calls step."""
@@ -149,13 +150,13 @@ class LearnerUpdate:
         """Perform a single update step."""
         reverb_sample = next(self._data_iterator)
 
-        split_key = jax.random.split(self._random_key)
-        self._random_key, subkey = split_key[:, 0], split_key[:, 1]  # Ignore device axis.
-
+        # Record the previous parameters to compare policy changes on same batch.
         prev_params = self._state.params
+        rng_key = self._state.rng_key
+
         self._state, metrics = self._update_step(
             params=self._state.params,
-            rng=subkey,
+            rng=self._state.rng_key,
             opt_state=self._state.opt_state,
             sample=reverb_sample.data,
         )
@@ -169,7 +170,7 @@ class LearnerUpdate:
             policy_kl_convergence = self._policy_convergence(
                 params=self._state.params,
                 prev_params=prev_params,
-                rng=subkey,
+                rng=rng_key,
                 sample=reverb_sample.data,
             )
             policy_kl_convergence = distributed_utils.get_from_first_device(policy_kl_convergence)
@@ -195,14 +196,17 @@ class LearnerUpdate:
             self._logger.write(metrics)
 
     def get_variables(self, names: Optional[Sequence[str]] = None) -> _types.Params:
+        """Retrieve the learner variables."""
         # Return first replica of parameters.
         del names
         return distributed_utils.get_from_first_device([self._state.params], as_numpy=False)
 
     def save(self) -> TrainingState:
+        """Retrieve the learner state to be saved."""
         return distributed_utils.get_from_first_device(self._state)
 
     def restore(self, state: TrainingState):
+        """Restore the learner state."""
         self._state = distributed_utils.replicate_on_all_devices(state, self._local_devices)
 
     def _get_step(self) -> int:
