@@ -1,9 +1,9 @@
+"""Compute BR by first planning and then acting."""
 import os
 from typing import Optional
 
 import haiku as hk
 import launchpad as lp
-import numpy as np
 import ujson
 from absl import app, flags, logging
 from ml_collections import config_dict, config_flags
@@ -11,8 +11,7 @@ from ml_collections import config_dict, config_flags
 from marl import bots as bots_lib
 from marl import services, utils
 from marl.services import snapshotter
-from marl.services.replay.reverb import adders as reverb_adders
-from marl.utils import spec_utils
+from marl.utils import spec_utils, wrappers
 from marl_experiments.gathering import world_model_game_proxy
 from marl_experiments.one_step_transfer import configs as exp_configs
 from marl_experiments.one_step_transfer.utils import builders, graphs
@@ -28,7 +27,8 @@ def get_config() -> config_dict.ConfigDict:
         frame_key="learner_frame",
         opponent_snapshot_path="",
         # opponent_snapshot_path="/scratch/wellman_root/wellman1/mxsmith/results/marl/gathering/br_main/snapshot/20221129-144818/impala/",
-        world_model_path="/scratch/wellman_root/wellman1/mxsmith/results/marl/gathering/one_step_transfer/train_world_model/snapshot/20221130-151502/params/",
+        world_model_path="/scratch/wellman_root/wellman1/mxsmith/results/marl/gathering/one_step_transfer/"
+        "train_world_model/snapshot/20221130-151502/params/",
         num_planner_steps=5_000,
         num_learner_steps=5_000,
         num_train_arenas=4,
@@ -222,6 +222,8 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
         random_key=next(key_sequence),
         game=game,
     )
+    learned_game = wrappers.TimeLimit(learned_game, num_steps=100)
+
     with program.group("plan_eval_learned_arena"):
         plan_eval_learned_arena_handle = program.add_node(
             builders.build_evaluation_arena_node(
