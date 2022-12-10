@@ -33,7 +33,7 @@ def sweep_baseline() -> Tuple[hyper.Sweep, str]:
         [
             hyper.fixed(
                 "opponent_snapshot_path",
-                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",
+                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",  # noqa: E501
             ),
             hyper.sweep("optimizer.learning_rate_init", [6e-3, 6e-4, 6e-5, 6e-6, 6e-7, 6e-8]),
             hyper.fixed("optimizer.learning_rate_steps", None),
@@ -65,22 +65,16 @@ _BR_WITH_PLANNING_MAIN = "br_with_planning_main"
 
 
 def sweep_planning() -> Tuple[hyper.Sweep, str]:
-    """Hyperparameter sweep over only planning and not using a simulator.
-
-    python br_with_planning_main.py \
-        --test \
-        --config.opponent_snapshot_path /scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055 \
-        --config.world_model_path /scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_train_world_model_memory/snapshot/20221206-162904/params
-    """
+    """Hyperparameter sweep over only planning and not using a simulator."""
     sweep = hyper.product(
         [
             hyper.fixed(
                 "opponent_snapshot_path",
-                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",
+                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",  # noqa: E501
             ),
             hyper.fixed(
                 "world_model_path",
-                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_train_world_model_memory/snapshot/20221206-162904/params",
+                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_train_world_model_memory/snapshot/20221206-162904/params",  # noqa: E501
             ),
             hyper.fixed("num_planner_steps", 5_000),
             hyper.fixed("num_learner_steps", 0),
@@ -100,18 +94,12 @@ def sweep_world_models() -> Tuple[hyper.Sweep, str]:
         [
             hyper.fixed(
                 "opponent_snapshot_path",
-                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",
+                "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",  # noqa: E501
             ),
             hyper.sweep(
                 "world_model_path",
                 [
-                    "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_0/snapshot/20221208-085701/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_1/snapshot/20221208-085715/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_2/snapshot/20221208-085714/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_3/snapshot/20221208-085716/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_4/snapshot/20221208-085714/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_5/snapshot/20221208-085716/params",
-                    # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_6/snapshot/20221208-085714/params",
+                    "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_08_world_model_reward_sweep_fixed/wid_0/snapshot/20221208-085701/params",  # noqa: E501
                 ],
             ),
             # TODO(maxsmith): Switch to 5k.
@@ -142,8 +130,9 @@ _SWEEPS = {
 _RESULT_DIR = "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/"
 _EXPERIMENT_MODULE = "marl_experiments.one_step_transfer"
 
-flags.DEFINE_string("name", None, "")
-flags.DEFINE_enum("sweep", None, list(_SWEEPS.keys()), "")
+flags.DEFINE_string("name", None, "Name of the experiment.")
+flags.DEFINE_enum("sweep", None, list(_SWEEPS.keys()), "Which configuration sweep to launch.")
+flags.DEFINE_string("script", "cpu_short", "SLURM launch script within the experiment's script/ directory.")
 FLAGS = flags.FLAGS
 
 
@@ -162,7 +151,7 @@ def main(_):
 
         # Build the SLURM launch command.
         command = f"sbatch --job-name {FLAGS.name}_{wid} "
-        command += "scripts/cpu_short.sh "
+        command += f"scripts/{FLAGS.script}.sh "
         command += f"-r {subdir.dir}"
         command += ' "utils/sweep_worker.py '
         command += f"--main {_EXPERIMENT_MODULE}.{experiment} "
