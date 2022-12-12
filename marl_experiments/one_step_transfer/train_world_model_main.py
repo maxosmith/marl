@@ -2,7 +2,6 @@ from typing import Optional
 
 import haiku as hk
 import launchpad as lp
-import numpy as np
 import ujson
 from absl import app, flags, logging
 from ml_collections import config_dict, config_flags
@@ -24,7 +23,7 @@ def get_config() -> config_dict.ConfigDict:
         num_learner_steps=10_000,
         # Previously trained bot configs.
         bot_snapshot_paths=[
-            "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",
+            "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_12_06_br_random_with_memory/wid_10/eval_arena/20221206-095632_59.79999923706055",  # noqa: E501
             # "/scratch/wellman_root/wellman1/mxsmith/results/marl/one_step_transfer/2022_11_29_br_sweep/wid_10/snapshot/20221129-163717/impala/",
             None,
         ],
@@ -61,7 +60,8 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
         config = config.lock()
     logging.info("Experiment's configuration:\n %s", config)
 
-    result_dir = utils.ResultDirectory(FLAGS.result_dir, exist_ok, overwrite=overwrite)
+    result_dir = config.result_dir if "result_dir" in config else FLAGS.result_dir
+    result_dir = utils.ResultDirectory(result_dir, exist_ok=exist_ok, overwrite=overwrite)
     ujson.dump(config.to_dict(), open(result_dir.file("config.json"), "w"))
 
     key_sequence = hk.PRNGSequence(config.seed)

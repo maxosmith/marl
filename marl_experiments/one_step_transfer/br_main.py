@@ -2,7 +2,6 @@ from typing import Optional
 
 import haiku as hk
 import launchpad as lp
-import numpy as np
 import ujson
 from absl import app, flags, logging
 from ml_collections import config_dict, config_flags
@@ -10,7 +9,6 @@ from ml_collections import config_dict, config_flags
 from marl import bots as bots_lib
 from marl import services, utils
 from marl.services import snapshotter
-from marl.services.replay.reverb import adders as reverb_adders
 from marl.utils import spec_utils
 from marl_experiments.one_step_transfer import configs as exp_configs
 from marl_experiments.one_step_transfer.utils import builders, graphs
@@ -60,7 +58,8 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
         config = config.lock()
     logging.info("Experiment's configuration:\n %s", config)
 
-    result_dir = utils.ResultDirectory(FLAGS.result_dir, exist_ok, overwrite=overwrite)
+    result_dir = config.result_dir if "result_dir" in config else FLAGS.result_dir
+    result_dir = utils.ResultDirectory(result_dir, exist_ok=exist_ok, overwrite=overwrite)
     ujson.dump(config.to_dict(), open(result_dir.file("config.json"), "w"))
 
     key_sequence = hk.PRNGSequence(config.seed)

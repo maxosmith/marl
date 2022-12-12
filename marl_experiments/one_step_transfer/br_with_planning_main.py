@@ -105,6 +105,15 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
         ctor_kwargs=dict(config=config, env_spec=env_spec),
     )
 
+    learned_game = world_model_game_proxy.WorldModelGameProxy(
+        transition=world_model_graphs.transition,
+        init_state=world_model_graphs.initial_state,
+        params=world_model_params,
+        random_key=next(key_sequence),
+        game=game,
+    )
+    learned_game = wrappers.TimeLimit(learned_game, num_steps=100)
+
     # ==============================================================================================
     # Build the program.
 
@@ -120,8 +129,14 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
     with program.group("counter"):
         counter_handle = program.add_node(builders.build_counter())
 
-    with program.group("learner"):
-        learner_handle = program.add_node(
+    with program.group("stopper"):
+        stopper_handle = program.add_node(builders.build_stopper())
+
+    # ----------------------------------------------------------------------------------------------
+    # Planning.
+
+    with program.group("planner"):
+        planner_handle = program.add_node(
             builders.build_agent_learner(
                 result_dir=result_dir.make_subdir(program._current_group),
                 random_key=next(key_sequence),
@@ -132,6 +147,84 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
                 loss_graph=agent_graphs.loss,
                 replay=replay_handle,
                 counter=counter_handle,
+            )
+        )
+
+    with program.group("plan_arena"):
+        plan_arena_handles = []
+        for i in range(config.num_plan_arenas):
+            plan_arena_handles.append(
+                program.add_node(
+                    builders.build_agent_planning_arena_without_var_servers(
+                        result_dir=result_dir.make_subdir(f"{program._current_group}_{i}"),
+                        step_key=config.step_key,
+                        random_key=next(key_sequence),
+                        policy_graph=agent_graphs.policy,
+                        initial_state_graph=agent_graphs.initial_state,
+                        learner=planner_handle,
+                        counter=counter_handle,
+                        replay=replay_handle,
+                        replay_config=config.agent_replay,
+                        game=game,
+                        players=bots,
+                        transition_graph=world_model_graphs.transition,
+                        world_init_graph=world_model_graphs.initial_state,
+                        world_model_params=world_model_params,
+                    )
+                )
+            )
+
+    # Evaluation arenas are currently seperate for Planning/Training stages to make pulling logs easier.
+    with program.group("plan_eval_real_arena"):
+        plan_eval_real_arena_handle = program.add_node(
+            builders.build_evaluation_arena_node(
+                step_key=config.step_key,
+                eval_frequency=config.eval_frequency,
+                random_key=next(key_sequence),
+                policy_graph=agent_graphs.eval_policy,
+                initial_state_graph=agent_graphs.initial_state,
+                learner=planner_handle,
+                bots=bots,
+                counter=counter_handle,
+                game_ctor=builders.build_game,
+                snapshot_template=snapshot_template,
+                result_dir=result_dir.make_subdir(program._current_group),
+            )
+        )
+
+    with program.group("plan_eval_learned_arena"):
+        plan_eval_learned_arena_handle = program.add_node(
+            builders.build_evaluation_arena_node(
+                step_key=config.step_key,
+                eval_frequency=config.eval_frequency,
+                random_key=next(key_sequence),
+                policy_graph=agent_graphs.eval_policy,
+                initial_state_graph=agent_graphs.initial_state,
+                learner=planner_handle,
+                bots=bots,
+                counter=counter_handle,
+                game_ctor=lambda: learned_game,
+                snapshot_template=snapshot_template,
+                result_dir=result_dir.make_subdir(program._current_group),
+            )
+        )
+
+    # ----------------------------------------------------------------------------------------------
+    # Acting.
+
+    with program.group("learner"):
+        learner_handle = program.add_node(
+            builders.build_agent_learner_with_warm_start(
+                result_dir=result_dir.make_subdir(program._current_group),
+                random_key=next(key_sequence),
+                step_key=config.step_key,
+                frame_key=config.frame_key,
+                optimizer_config=config.agent_optimizer,
+                replay_config=config.agent_replay,
+                loss_graph=agent_graphs.loss,
+                replay=replay_handle,
+                counter=counter_handle,
+                warm_start_source=planner_handle,
             )
         )
 
@@ -156,48 +249,6 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
                 )
             )
 
-    with program.group("plan_arena"):
-        plan_arena_handles = []
-        for i in range(config.num_plan_arenas):
-            plan_arena_handles.append(
-                program.add_node(
-                    builders.build_agent_planning_arena_without_var_servers(
-                        result_dir=result_dir.make_subdir(f"{program._current_group}_{i}"),
-                        step_key=config.step_key,
-                        random_key=next(key_sequence),
-                        policy_graph=agent_graphs.policy,
-                        initial_state_graph=agent_graphs.initial_state,
-                        learner=learner_handle,
-                        counter=counter_handle,
-                        replay=replay_handle,
-                        replay_config=config.agent_replay,
-                        game=game,
-                        players=bots,
-                        transition_graph=world_model_graphs.transition,
-                        world_init_graph=world_model_graphs.initial_state,
-                        world_model_params=world_model_params,
-                    )
-                )
-            )
-
-    # Evaluation arenas are currently seperate for Planning/Training stages to make pulling logs easier.
-    with program.group("plan_eval_real_arena"):
-        plan_eval_real_arena_handle = program.add_node(
-            builders.build_evaluation_arena_node(
-                step_key=config.step_key,
-                eval_frequency=config.eval_frequency,
-                random_key=next(key_sequence),
-                policy_graph=agent_graphs.eval_policy,
-                initial_state_graph=agent_graphs.initial_state,
-                learner=learner_handle,
-                bots=bots,
-                counter=counter_handle,
-                game_ctor=builders.build_game,
-                snapshot_template=snapshot_template,
-                result_dir=result_dir.make_subdir(program._current_group),
-            )
-        )
-
     with program.group("train_eval_real_arena"):
         train_eval_real_arena_handle = program.add_node(
             builders.build_evaluation_arena_node(
@@ -210,32 +261,6 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
                 bots=bots,
                 counter=counter_handle,
                 game_ctor=builders.build_game,
-                snapshot_template=snapshot_template,
-                result_dir=result_dir.make_subdir(program._current_group),
-            )
-        )
-
-    learned_game = world_model_game_proxy.WorldModelGameProxy(
-        transition=world_model_graphs.transition,
-        init_state=world_model_graphs.initial_state,
-        params=world_model_params,
-        random_key=next(key_sequence),
-        game=game,
-    )
-    learned_game = wrappers.TimeLimit(learned_game, num_steps=100)
-
-    with program.group("plan_eval_learned_arena"):
-        plan_eval_learned_arena_handle = program.add_node(
-            builders.build_evaluation_arena_node(
-                step_key=config.step_key,
-                eval_frequency=config.eval_frequency,
-                random_key=next(key_sequence),
-                policy_graph=agent_graphs.eval_policy,
-                initial_state_graph=agent_graphs.initial_state,
-                learner=learner_handle,
-                bots=bots,
-                counter=counter_handle,
-                game_ctor=lambda: learned_game,
                 snapshot_template=snapshot_template,
                 result_dir=result_dir.make_subdir(program._current_group),
             )
@@ -267,15 +292,11 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
             )
         )
 
-    with program.group("stopper"):
-        stopper_handle = program.add_node(builders.build_stopper())
-
     # ==============================================================================================
 
     logging.info("Launching program.")
     terminal = "output_to_files" if "LAUNCHPAD_LOGGING_DIR" in os.environ else "current_terminal"
     manager = lp.launch(program, launch_type=lp.LaunchType.LOCAL_MULTI_PROCESSING, terminal=terminal)
-    learner_client = learner_handle.dereference()
 
     logging.info("Warm-starting through planning.")
     plan_arena_clients = [handle.dereference() for handle in plan_arena_handles]
@@ -284,19 +305,22 @@ def run(config: Optional[config_dict.ConfigDict] = None, exist_ok: bool = False,
     for plan_client in plan_arena_clients:
         plan_client.futures.run()
 
-    learner_client.run(config.num_planner_steps)
+    planner_handle.dereference().run(config.num_planner_steps)
 
     for plan_client in plan_arena_clients:
         plan_client.stop()
 
     logging.info("Fine-tuning through acting.")
+    learner_client = learner_handle.dereference()
+    learner_client.warm_start()  # Sync parameters before starting arenas.
+
     train_arena_clients = [handle.dereference() for handle in train_arena_handles]
     train_arena_clients.append(train_eval_real_arena_handle.dereference())
     train_arena_clients.append(train_eval_learned_arena_handle.dereference())
     for arena_client in train_arena_clients:
         arena_client.futures.run()
 
-    learner_client.run(config.num_learner_steps)
+    learner_handle.dereference().run(config.num_learner_steps)
 
     for train_client in train_arena_clients:
         train_client.stop()

@@ -55,7 +55,12 @@ _TRAIN_WORLD_MODEL_MAIN = "train_world_model_main"
 
 def sweep_reward() -> Tuple[hyper.Sweep, str]:
     """Sweeps the reward loss coefficient."""
-    sweep = hyper.product([hyper.sweep("world_model.reward_cost", [1.0, 10.0, 25.0, 50.0, 75.0, 100.0, 1_000.0])])
+    sweep = hyper.product(
+        [
+            hyper.sweep("world_model.reward_cost", [10.0, 25.0, 50.0, 75.0, 100.0]),
+            hyper.fixed("num_learner_steps", 1_000_000),
+        ]
+    )
     return sweep, _TRAIN_WORLD_MODEL_MAIN
 
 

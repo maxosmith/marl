@@ -5,7 +5,6 @@ from typing import List
 import haiku as hk
 import jax
 import launchpad as lp
-import numpy as np
 import optax
 import reverb
 import tree
@@ -19,9 +18,15 @@ from marl.utils.loggers import terminal as terminal_logger_lib
 from marl_experiments.gathering import services as gathering_services
 from marl_experiments.gathering.world_model_game_proxy import WorldModelGameProxy
 from marl_experiments.one_step_transfer.services import (
+    learner_update_with_warm_start,
     render_arena,
     world_model_learner,
 )
+
+
+def _data_to_string(x):
+    """Render a datalog to string."""
+    return terminal_logger_lib.data_to_string(x, "\n")
 
 
 def build_game():
@@ -62,6 +67,7 @@ def build_snapshot_node(
     learner_update_handle: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ):
+    """Builds a node for snapshotting parameters periodically."""
     return services.Snapshotter(
         variable_source=learner_update_handle,
         snapshot_templates={"params": snapshot_template},
@@ -131,6 +137,7 @@ def build_world_replay(config: config_dict.ConfigDict, env_spec: worlds.Environm
     """Build a replay buffer used to train the world model."""
 
     def _build_reverb_node(env_spec: worlds.EnvironmentSpec, table_name: str) -> List[reverb.Table]:
+        """Closure for building a reverb node."""
         env_spec = tree.map_structure(
             lambda x: worlds.ArraySpec(shape=(2,) + x.shape, dtype=x.dtype, name=x.name), env_spec
         )
@@ -472,12 +479,9 @@ def build_agent_learner(
     counter: lp.CourierHandle,
     result_dir: utils.ResultDirectory,
 ) -> services.LearnerUpdate:
-    # Print (key, values) to unique lines to account for non-scalar values.
-    format_fn = lambda x: terminal_logger_lib.data_to_string(x, "\n")
-
     logger = loggers.LoggerManager(
         loggers=[
-            loggers.TerminalLogger(time_frequency=5, stringify_fn=format_fn),
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=_data_to_string),
             loggers.TensorboardLogger(result_dir.dir, step_key=step_key),
         ],
     )
@@ -539,6 +543,85 @@ def build_agent_learner(
 
 
 @node_utils.build_courier_node(disable_run=True)
+def build_agent_learner_with_warm_start(
+    step_key: str,
+    frame_key: str,
+    optimizer_config: config_dict.ConfigDict,
+    replay_config: config_dict.ConfigDict,
+    random_key: jax.random.PRNGKey,
+    loss_graph: hk.Transformed,
+    replay: lp.CourierHandle,
+    counter: lp.CourierHandle,
+    warm_start_source: services.VariableSourceInterface,
+    result_dir: utils.ResultDirectory,
+) -> services.LearnerUpdate:
+
+    logger = loggers.LoggerManager(
+        loggers=[
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=_data_to_string),
+            loggers.TensorboardLogger(result_dir.dir, step_key=step_key),
+        ],
+    )
+    local_counter = services.Counter(parent=counter, time_delta=0)
+
+    optimizer = None
+    if optimizer_config.optimizer_name == "adam":
+        optimizer = optax.adam
+    elif optimizer_config.optimizer_name == "rmsprop":
+        optimizer = optax.rmsprop
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_config.optimizer_name}.")
+
+    grad_trans = []
+    # Clip by global gradient norm.
+    if optimizer_config.max_norm_steps:
+        grad_trans.append(
+            optax.inject_hyperparams(optax.clip_by_global_norm)(
+                max_norm=optax.linear_schedule(
+                    init_value=optimizer_config.max_norm_init,
+                    end_value=optimizer_config.max_norm_end,
+                    transition_steps=optimizer_config.max_norm_steps,
+                )
+            )
+        )
+    else:
+        grad_trans.append(optax.clip_by_global_norm(max_norm=optimizer_config.max_norm_init))
+    # Learning rate schedule for optimizer.
+    if optimizer_config.learning_rate_steps:
+        grad_trans.append(
+            optax.inject_hyperparams(optimizer)(
+                learning_rate=optax.linear_schedule(
+                    init_value=optimizer_config.learning_rate_init,
+                    end_value=optimizer_config.learning_rate_end,
+                    transition_steps=optimizer_config.learning_rate_steps,
+                )
+            )
+        )
+    else:
+        grad_trans.append(optimizer(learning_rate=optimizer_config.learning_rate_init))
+
+    optimizer = optax.chain(*grad_trans)
+
+    variable_source = services.VariableClient(source=warm_start_source)
+    data_iterator = services.ReverbPrefetchClient(
+        reverb_client=replay,
+        table_name=replay_config.replay_table_name,
+        batch_size=optimizer_config.batch_size,
+    )
+    return learner_update_with_warm_start.LearnerUpdate(
+        loss_fn=loss_graph,
+        optimizer=optimizer,
+        data_iterator=data_iterator,
+        variable_source=variable_source,
+        logger=logger,
+        counter=local_counter,
+        step_key=step_key,
+        frame_key=frame_key,
+        random_key=random_key,
+    )
+
+
+@node_utils.build_courier_node(disable_run=True)
 def build_world_model_learner(
     step_key: str,
     frame_key: str,
@@ -550,11 +633,9 @@ def build_world_model_learner(
     replay_config: config_dict.ConfigDict,
     optimizer_config: config_dict.ConfigDict,
 ):
-    format_fn = lambda x: terminal_logger_lib.data_to_string(x, "\n")
-
     logger = loggers.LoggerManager(
         loggers=[
-            loggers.TerminalLogger(time_frequency=5, stringify_fn=format_fn),
+            loggers.TerminalLogger(time_frequency=5, stringify_fn=_data_to_string),
             loggers.TensorboardLogger(result_dir.dir),
         ],
     )
