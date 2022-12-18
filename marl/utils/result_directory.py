@@ -1,3 +1,4 @@
+"""Manages a directory to save results."""
 import os
 import os.path as osp
 
@@ -24,18 +25,17 @@ class ResultDirectory:
         os.makedirs(self.dir, exist_ok=exist_ok)
 
     def make_subdir(self, name: str) -> "ResultDirectory":
-        """Create a `ResultDirectory` for a sub-"""
-        subdir = self.subdir(name)
-        if osp.exists(subdir):
-            raise ValueError(f"Subdirectory already exists: {subdir}.")
-        os.mkdir(subdir)
-        return ResultDirectory(self.subdir(name), exist_ok=True)
+        """Create a `ResultDirectory` for a subdirectory."""
+        return ResultDirectory(osp.join(self.dir, name), exist_ok=False, overwrite=True)
 
-    def subdir(self, name: str) -> str:
-        return osp.join(self.dir, name)
+    def subdir(self, name: str) -> "ResultDirectory":
+        """Get a subdirectory."""
+        return ResultDirectory(osp.join(self.dir, name), exist_ok=True, overwrite=False)
 
     def file(self, name: str) -> str:
+        """Get a file."""
         return osp.join(self.dir, name)
 
     def __str__(self) -> str:
+        """String representation."""
         return dir

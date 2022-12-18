@@ -32,3 +32,10 @@ def zeros_like(x: Union[np.ndarray, int, float, np.number]):
 def one_hot(x: np.ndarray, num_classes: int) -> np.ndarray:
     """One-hot encodes an array."""
     return np.eye(num_classes)[x]
+
+
+def broadcast_concat(x: jnp.DeviceArray, y: jnp.DeviceArray) -> jnp.DeviceArray:
+    """Broadcast and concatenate y onto the end of x."""
+    if len(x.shape) != len(y.shape):
+        y = jnp.broadcast_to(y, x.shape[:-1] + y.shape)
+    return jnp.concatenate([x, y], axis=-1)
