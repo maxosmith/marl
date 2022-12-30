@@ -10,6 +10,7 @@ import cloudpickle
 import numpy as np
 import tree
 from absl import logging
+from ml_collections import config_dict
 
 from marl import _types
 from marl.services.interfaces import variable_source_interface, worker_interface
@@ -262,6 +263,12 @@ def save_tree(ckpt_dir: str, data: Any, array_name: str, tree_name: str):
 
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
+
+    def _config_to_dict(x):
+        """Convert all config dicts to nested dicts so they're tree-like."""
+        return x.to_dict() if isinstance(x, config_dict.ConfigDict) else x
+
+    data = tree.map_structure(_config_to_dict, data)
 
     def _is_numpy(x):
         """Check if item is a numpy-like array."""
