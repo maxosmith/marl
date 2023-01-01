@@ -1,3 +1,4 @@
+"""Arena with at least one learner who is populating a replay buffer."""
 import dataclasses
 import enum
 import operator
@@ -12,7 +13,6 @@ from marl import _types, individuals, utils, worlds
 from marl.services import counter as counter_lib
 from marl.services.arenas import base
 from marl.utils import dict_utils, loggers, signals, spec_utils, time_utils, tree_utils
-from marl.utils.loggers.base import LogData
 
 
 class _StopwatchKeys(enum.Enum):
@@ -27,6 +27,8 @@ class _StopwatchKeys(enum.Enum):
 
 @dataclasses.dataclass
 class EpisodeResult:
+    """Results from an episode of training."""
+
     episode_length: int
     episode_return: _types.Tree
 
@@ -41,7 +43,7 @@ class EpisodeResult:
 
         del log_data["episode_return"]
         return_data = tree_utils.flatten_as_dict(self.episode_return)
-        return_data = dict_utils.prefix_keys(return_data, "train_return_per_episode/")
+        return_data = dict_utils.prefix_keys(return_data, "train_return_per_episode")
         log_data.update(return_data)
 
         return log_data
@@ -51,7 +53,7 @@ class EpisodeResult:
 class TrainingArena(base.ArenaInterface):
     """Training arenas play games between learning agents and non-learning agents (bots).
 
-    Attributes:
+    Args:
         game:
         players:
         logger:
@@ -64,6 +66,7 @@ class TrainingArena(base.ArenaInterface):
     step_key: Optional[str] = None
 
     def __post_init__(self):
+        """Post-initializer."""
         if self.counter and not self.step_key:
             raise ValueError("Must specify step key with counter.")
         if self.step_key and not self.counter:
@@ -188,6 +191,7 @@ class TrainingArena(base.ArenaInterface):
         self._stop = True
 
     def _maybe_sychronize_agent_parameters(self):
+        """Synchronze learner parameters."""
         for player in self.players.values():
             if isinstance(player, individuals.Agent):
                 player.update()

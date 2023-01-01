@@ -24,7 +24,7 @@ class EpisodeResult(NamedTuple):
         log_data = dict(episode_length=self.episode_length)
 
         return_data = tree_utils.flatten_as_dict(self.episode_return)
-        return_data = dict_utils.prefix_keys(return_data, "eval_return/")
+        return_data = dict_utils.prefix_keys(return_data, "eval_return")
         log_data.update(return_data)
 
         return log_data
@@ -42,6 +42,7 @@ class EvaluationScenario:
     bot_id_to_player_id: Optional[Mapping[_types.PlayerID, _types.PlayerID]] = None
 
     def __post_init__(self):
+        """Post-initializer."""
         # If PlayerID mappings were not specified, we assume that the PlayerID of the
         # agents/bots in their populations are unique and correct.
         if not self.agent_id_to_player_id:
@@ -51,15 +52,7 @@ class EvaluationScenario:
 
 
 class EvaluationArena(base.ArenaInterface):
-    """Evaluation arenas play games between individuals.
-
-    Args:
-        agents:
-        bots:
-        scenarios:
-        evaluation_frequncy:
-        logger:
-    """
+    """Evaluation arenas play games between individuals."""
 
     def __init__(
         self,
@@ -72,6 +65,7 @@ class EvaluationArena(base.ArenaInterface):
         snapshotter: Optional[services.PrioritySnapshotter],
         step_key: str,
     ):
+        """Initializes an EvaluationArena."""
         self._agents = agents
         self._bots = bots
         if isinstance(scenarios, EvaluationScenario):
@@ -108,6 +102,7 @@ class EvaluationArena(base.ArenaInterface):
         return EpisodeResult(episode_length=np.asarray(episode_length), episode_return=episode_return)
 
     def run_evaluation(self, step: int):
+        """Run a pass over all evaluation scenarios."""
         logging.info("Running evaluation scenarios.")
 
         # Get the current state of all learning agents.
@@ -134,12 +129,21 @@ class EvaluationArena(base.ArenaInterface):
             self._logger.write(results)
 
             if self._snapshotter and (scenario_i == 0):
-                warnings.warn("Currently snapshotter only applies to Player 0 on the first scenario.")
-                self._snapshotter.save(results["eval_return/0"], self._agents[0].params)
+                warnings.warn("Currently snapshotter only applies to the first scenario.")
+                if len(self._agents) > 1:
+                    raise ValueError("Currently snapshotting in evaluation requires only one agent.")
+                eval_id = list(self._agents.keys())[0]
+                self._snapshotter.save(results[f"eval_return/{eval_id}"], self._agents[eval_id].params)
 
         logging.info("Evaluation complete.")
 
     def run(self):
+        """Run periodic evaluation."""
+        # Reset running stateful variables to allow `run` to be called multiple times.
+        logging.info("Running evaluation arena.")
+        self._stop = False
+        self._last_eval = -np.inf
+
         with signals.runtime_terminator():
             while True:
                 if self._stop:
@@ -158,8 +162,11 @@ class EvaluationArena(base.ArenaInterface):
                     # Do not sleep for a long period of time to avoid LaunchPad program
                     # termination hangs (time.sleep is not interruptible).
                     time.sleep(1)
+                    if self._stop:
+                        break
+        logging.info("Evaluation arena stopped.")
 
     def stop(self):
         """Stop running this service."""
-        logging.info("Stopping training arena.")
+        logging.info("Stopping evaluation arena.")
         self._stop = True
