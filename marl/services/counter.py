@@ -102,6 +102,7 @@ class Counter:
         return counts
 
     def save(self) -> Mapping[str, Mapping[str, _Number]]:
+        """Save the state of the counter."""
         return {"counts": self._counts, "cache": self._cache}
 
     def restore(self, state: Mapping[str, Mapping[str, _Number]]):
@@ -115,3 +116,10 @@ class Counter:
         if not self._prefix or self._return_only_prefixed:
             return "steps"
         return f"{self._prefix}_steps"
+
+    def reset(self):
+        """Reset the state of the counter."""
+        with self._lock:
+            self._counts = {}
+            self._cache = {}
+            self._last_sync_time = 0.0

@@ -1,5 +1,5 @@
 """Strategy objects defining containers of policies and a distribution over them."""
-from typing import Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -39,3 +39,22 @@ class Strategy(individuals.Bot):
     def set_policy(self, policy_id: int):
         """Set the policy for the next episode."""
         self._policy = self._policies[policy_id]
+
+    def add_policy(self, policy):
+        """Adds a new policy with zero support."""
+        self._policies.append(policy)
+        self._mixture = np.append(self._mixture, 0.0)
+
+    @property
+    def mixture(self) -> List[float]:
+        """Getter for `mixture`."""
+        return self._mixture
+
+    @mixture.setter
+    def mixture(self, value: Sequence[float]):
+        """Setter for `mixture`."""
+        self._mixture = value
+
+    def __len__(self):
+        """Length as the number of policies."""
+        return len(self._policies)

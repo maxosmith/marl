@@ -67,12 +67,15 @@ class LearnerUpdate:
             devices,
             local_devices,
         )
+        self._loss_fn = loss_fn
+        self._optimizer = optimizer
         self._logger = logger
         self._counter = counter
         self._step_key = step_key
         self._frame_key = frame_key
         self._data_iterator = data_iterator
         self._compute_policy_kl_convergence = compute_policy_kl_convergence
+        self._random_key = random_key
 
         @jax.jit
         def _update_step(
@@ -131,11 +134,8 @@ class LearnerUpdate:
             _policy_convergence, axis_name=LearnerUpdate._PMAP_AXIS_NAME, devices=self._devices
         )
 
-        random_key, subkey = jax.random.split(random_key)
-        params = loss_fn.init(subkey)
-        opt_state = optimizer.init(params)
-        self._state = TrainingState(params=params, opt_state=opt_state, rng_key=random_key)
-        self._state = distributed_utils.replicate_on_all_devices(self._state, self._local_devices)
+        self._state = None
+        self.reset_training_state()
 
     def run(self, num_steps: Optional[int] = None) -> None:
         """Run the update loop; typically an infinite loop which calls step."""
@@ -208,6 +208,14 @@ class LearnerUpdate:
     def restore(self, state: TrainingState):
         """Restore the learner state."""
         self._state = distributed_utils.replicate_on_all_devices(state, self._local_devices)
+
+    def reset_training_state(self):
+        """Reset the learner's parameters and optimizer state."""
+        self._random_key, subkey = jax.random.split(self._random_key)
+        params = self._loss_fn.init(subkey)
+        opt_state = self._optimizer.init(params)
+        self._state = TrainingState(params=params, opt_state=opt_state, rng_key=self._random_key)
+        self._state = distributed_utils.replicate_on_all_devices(self._state, self._local_devices)
 
     def _get_step(self) -> int:
         """Get the current global step count."""

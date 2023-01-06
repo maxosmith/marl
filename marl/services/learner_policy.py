@@ -56,6 +56,7 @@ class LearnerPolicy(individuals.Agent):
         # Start a new episode in the replay buffer.
         if not timestep.first():
             raise ValueError("Reset must be called after the first timestep.")
+        self._reverb_adder.reset()
         return state
 
     def update(self):

@@ -26,11 +26,11 @@ class ResultDirectory:
 
     def make_subdir(self, name: str) -> "ResultDirectory":
         """Create a `ResultDirectory` for a subdirectory."""
-        return ResultDirectory(osp.join(self.dir, name), exist_ok=False, overwrite=True)
+        return ResultDirectory(osp.join(self.dir, str(name)), exist_ok=False, overwrite=True)
 
     def subdir(self, name: str) -> "ResultDirectory":
         """Get a subdirectory."""
-        return ResultDirectory(osp.join(self.dir, name), exist_ok=True, overwrite=False)
+        return ResultDirectory(osp.join(self.dir, str(name)), exist_ok=True, overwrite=False)
 
     def file(self, name: str) -> str:
         """Get a file."""

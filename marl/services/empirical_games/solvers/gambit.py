@@ -76,7 +76,7 @@ class Gambit:
             nash_file = osp.join(temp_dir, "nash.txt")
 
             self._write_nfg_file(payoffs, nfg_file)
-            self._run_gambit_analysis(nfg_file, nash_file, len(payoffs.shape) - 1)
+            self._run_gambit_analysis(nfg_file, nash_file)
             strategies = self._read_nash_file(nash_file, payoffs.shape[:-1])
             return {agent_id: mixture for agent_id, mixture in enumerate(strategies)}
 
@@ -100,11 +100,6 @@ class Gambit:
 
             nfg_file.write(name_line)
             nfg_file.write(f"{num_policies_line}\n\n")
-
-            # for col in range(payoffs.shape[1]):
-            #     for row in range(payoffs.shape[0]):
-            #         nfg_file.write(str(payoffs[row][col][0]) + " ")
-            #         nfg_file.write(str(payoffs[row][col][1]) + " ")
 
             # Write the payoffs to the file.
             new_axes = list(range(len(payoffs.shape)))

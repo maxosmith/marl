@@ -2,7 +2,7 @@
 import dataclasses
 import itertools
 import shelve
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 
@@ -35,7 +35,7 @@ class EmpiricalNFG:
         else:
             self.payoffs = {}
         # Record the number of policies available per-agent.
-        self.num_policies = {}
+        self.num_policies = {id: 0 for id in range(self.num_agents)}
 
     def __del__(self):
         """Destructor."""
@@ -93,7 +93,6 @@ class EmpiricalNFG:
                 profile[agent_id] = new_profile
 
         # Get all possible profiles.
-        # num_policies = [self.num_policies[i] for i in range(self.num_agents)]
         num_policies = [len(profile[i]) for i in range(self.num_agents)]
         all_profiles = [np.arange(x) for x in num_policies]
 
