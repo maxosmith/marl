@@ -21,6 +21,7 @@ class IMPALAState(NamedTuple):
 
     recurrent_state: _types.Tree
     logits: _types.Logits
+    value: _types.Array
     prev_action: _types.Action
 
 
@@ -77,18 +78,19 @@ class IMPALA(hk.RNNCore):
         embeddings = self._timestep_encoder(timestep, state)
         embeddings, new_recurrent_state = self._memory_core(embeddings, state.recurrent_state)
         logits = self._policy_head(embeddings)
-        _ = self._value_head(embeddings)  # Calculate values to build associated parameters.
+        value = self._value_head(embeddings)
         if self._evaluation:
             action = jnp.argmax(logits, axis=-1)
         else:
             action = hk.multinomial(hk.next_rng_key(), logits, num_samples=1)[0]
-        return action, IMPALAState(recurrent_state=new_recurrent_state, logits=logits, prev_action=action)
+        return action, IMPALAState(recurrent_state=new_recurrent_state, logits=logits, value=value, prev_action=action)
 
     def initial_state(self, batch_size: Optional[int]):
         """Generates an initial state for the policy."""
         return IMPALAState(
             recurrent_state=self._memory_core.initial_state(batch_size),
             logits=np.zeros([self._policy_head.num_actions], dtype=np.float32),
+            value=np.array(0.0, dtype=np.float32),
             # No previous action is denoted as -1, which will give an all zero one-hot.
             prev_action=np.array(-1, dtype=np.int32),
         )

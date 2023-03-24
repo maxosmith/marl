@@ -30,7 +30,7 @@ class OpenSpielProxy(worlds.Game):
             logging.info("Proxy built using game instance: %s", game.get_type().short_name)
             self._game = game
         elif kwargs:
-            game_settings = {key: pyspiel.GameParameter(val) for (key, val) in kwargs.items()}
+            game_settings = dict(kwargs.items())
             logging.info("Proxy built using game settings: %s", game_settings)
             self._game = pyspiel.load_game(game, game_settings)
         else:

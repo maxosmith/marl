@@ -55,6 +55,11 @@ class Strategy(individuals.Bot):
         """Setter for `mixture`."""
         self._mixture = value
 
+    @property
+    def policy(self):
+        """Gett for `policy`."""
+        return self._policy
+
     def __len__(self):
         """Length as the number of policies."""
         return len(self._policies)

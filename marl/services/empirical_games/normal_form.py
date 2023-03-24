@@ -2,7 +2,7 @@
 import dataclasses
 import itertools
 import shelve
-from typing import Dict, Optional, Union
+from typing import Dict, Mapping, Optional, Union
 
 import numpy as np
 
@@ -22,20 +22,22 @@ class EmpiricalNFG:
     Args:
         num_agents: The number of agents.
         file_backed_path: Optional path to a file for caching the NFG.
+        flag: Flag for loading a shelve from disk.
     """
 
     num_agents: int
     path: Optional[str] = None
+    flag: str = "c"
 
     def __post_init__(self):
         """Initialize a new normal form game."""
         # Payoffs associated with each strategy profile.
         if self.path:
-            self.payoffs = shelve.open(self.path)
+            self.payoffs = shelve.open(self.path, flag=self.flag)
+            self.num_policies = self._load_num_policies()
         else:
             self.payoffs = {}
-        # Record the number of policies available per-agent.
-        self.num_policies = {id: 0 for id in range(self.num_agents)}
+            self.num_policies = {id: 0 for id in range(self.num_agents)}
 
     def __del__(self):
         """Destructor."""
@@ -166,6 +168,17 @@ class EmpiricalNFG:
         for agent in range(self.num_agents):
             key += f"x{profile[agent]}"
         return key
+
+    def _load_num_policies(self) -> Mapping[_types.PlayerID, int]:
+        """Get the number of policies from a loaded shelf."""
+        num_policies = {id: 0 for id in range(self.num_agents)}
+
+        for key in self.payoffs.keys():
+            policy_ids = key.split("x")[1:]  # Keys are of the form: `x#x#`.
+            for player_id, policy_id in enumerate(policy_ids):
+                num_policies[player_id] = max(num_policies[player_id], int(policy_id))
+
+        return num_policies
 
     def __contains__(self, profile) -> bool:
         """Check if this has payoffs for a profile.

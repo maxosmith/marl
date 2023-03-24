@@ -10,11 +10,12 @@ import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import reverb
 from absl import logging
 
-from marl import _types
+from marl import _types, utils
 from marl.services import counter as counter_lib
 from marl.utils import distributed_utils, loggers
 
@@ -76,6 +77,7 @@ class LearnerUpdate:
         self._data_iterator = data_iterator
         self._compute_policy_kl_convergence = compute_policy_kl_convergence
         self._random_key = random_key
+        self._stopwatch = utils.Stopwatch(buffer_size=1_000)
 
         @jax.jit
         def _update_step(
@@ -148,18 +150,22 @@ class LearnerUpdate:
 
     def step(self):
         """Perform a single update step."""
+        self._stopwatch.start("fetch")
         reverb_sample = next(self._data_iterator)
+        self._stopwatch.stop("fetch")
 
         # Record the previous parameters to compare policy changes on same batch.
         prev_params = self._state.params
         rng_key = self._state.rng_key
 
+        self._stopwatch.start("update")
         self._state, metrics = self._update_step(
             params=self._state.params,
             rng=self._state.rng_key,
             opt_state=self._state.opt_state,
             sample=reverb_sample.data,
         )
+        self._stopwatch.stop("update")
 
         # Take results from first replica.
         # NOTE: This measure will be a noisy estimate for the purposes
@@ -181,6 +187,11 @@ class LearnerUpdate:
         metrics["replay/priority"] = jnp.mean(reverb_sample.info.priority)
         metrics["replay/probability"] = jnp.mean(reverb_sample.info.probability)
         metrics["replay/table_size"] = jnp.mean(reverb_sample.info.table_size)
+
+        # Time metadata.
+        times = self._stopwatch.get_splits(aggregate_fn=np.mean)
+        for key, value in times.items():
+            metrics[f"times/{key}"] = value
 
         if self._counter:
             counts = self._counter.increment(
