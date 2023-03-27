@@ -55,6 +55,13 @@ class Strategy(individuals.Bot):
         """Setter for `mixture`."""
         self._mixture = value
 
+        if len(self._mixture) != len(self._policies):
+            raise ValueError("Mixture must define coefficient for each policy.")
+        if (len(self._mixture) > 0) and (np.sum(self._mixture) - 1.0 > 0.0001):
+            raise ValueError("Mixture must be a valid probability distribution.")
+        if np.any(np.asarray(self._mixture) < 0):
+            raise ValueError("Mixture must be a valid probability distribution.")
+
     @property
     def policy(self):
         """Gett for `policy`."""
