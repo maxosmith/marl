@@ -94,8 +94,9 @@ class Snapshotter(worker_interface.WorkerInterface):
     def _save(self):
         if not self._snapshot_paths:
             # Lazy discovery of already existing snapshots.
-            self._snapshot_paths = os.listdir(self._path)
+            self._snapshot_paths = file_utils.get_subdirs(self._path)
             self._snapshot_paths.sort(reverse=True)
+            logging.info(self._snapshot_paths)
 
         snapshot_location = os.path.join(self._path, time.strftime("%Y%m%d-%H%M%S"))
         if self._snapshot_paths and self._snapshot_paths[0] == snapshot_location:
@@ -170,7 +171,7 @@ class PrioritySnapshotter:
     def save(self, priority: float, params):
         if not self._snapshot_paths:
             # Lazy discovery of already existing snapshots.
-            self._snapshot_paths = os.listdir(self._path)
+            self._snapshot_paths = file_utils.get_subdirs(self._path)
             self._snapshot_paths.sort(reverse=True)
 
         snapshot_location = os.path.join(self._path, f'{time.strftime("%Y%m%d-%H%M%S")}_{priority}')
