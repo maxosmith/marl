@@ -21,6 +21,7 @@ from ml_collections import config_dict
 import dm_env
 from meltingpot.python import substrate
 from typing import Union, Any
+import numpy as np
 
 _OBSERVATION_KEY = "RGB"
 _GLOBAL_KEY = "WORLD.RGB"
@@ -64,13 +65,21 @@ class MeltingPotProxy(worlds.Game):
 
     def reward_specs(self) -> worlds.PlayerIDToSpec:
         """Describes the reward returned by the environment."""
-        specs = self._game.reward_spec()
-        return {player_id: specs[player_id] for player_id in range(self.num_players)}
+        return {
+            player_id: worlds.ArraySpec(shape=(), dtype=np.float32, name="reward")
+            for player_id in range(self.num_players)
+        }
 
     def observation_specs(self) -> worlds.PlayerIDToSpec:
         """Describes the observations provided by the environment."""
-        specs = self._game.observation_spec()
-        return {player_id: specs[player_id][_OBSERVATION_KEY] for player_id in range(self.num_players)}
+        specs = {}
+        for player_id, player_spec in enumerate(self._game.observation_spec()):
+            specs[player_id] = worlds.ArraySpec(
+                shape=player_spec[_OBSERVATION_KEY].shape,
+                dtype=np.int32,
+                name=player_spec[_OBSERVATION_KEY].name,
+            )
+        return specs
 
     def action_specs(self) -> worlds.PlayerIDToSpec:
         """Describes the actions that should be provided to `step`."""
@@ -130,7 +139,7 @@ class MeltingPotProxy(worlds.Game):
         for player_id in range(self.num_players):
             marl_timesteps[player_id] = worlds.TimeStep(
                 step_type=worlds.StepType(timesteps.step_type.value),
-                observation=timesteps.observation[player_id][_OBSERVATION_KEY],
-                reward=timesteps.reward[player_id],
+                observation=timesteps.observation[player_id][_OBSERVATION_KEY].astype(np.int32),
+                reward=timesteps.reward[player_id].astype(np.float32),
             )
         return marl_timesteps
