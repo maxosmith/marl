@@ -1,0 +1,70 @@
+FROM ubuntu:22.04 as base
+
+ENV DEBIAN_FRONTEND noninteractive
+
+RUN apt update
+RUN apt -y install software-properties-common
+RUN yes "" | add-apt-repository ppa:deadsnakes/ppa
+
+RUN apt-get -y install \
+    clang \
+    curl \
+    git \
+    python3.8 \
+    python3.8-dev \
+    python3.8-distutils \
+    python3.8-venv \
+    sudo
+
+RUN python3.8 -m venv /venv/
+ENV PATH=/venv/bin:$PATH
+
+RUN python -m pip install --upgrade pip
+RUN pip install matplotlib
+
+# OpenSpiel: Install.
+RUN mkdir openspiel
+RUN git clone https://github.com/deepmind/open_spiel.git openspiel
+WORKDIR /openspiel/
+RUN apt-get -y install tzdata
+RUN ./install.sh
+RUN pip install --upgrade setuptools testresources
+RUN pip install --upgrade -r requirements.txt
+RUN pip install --upgrade cmake
+
+# OpenSpiel: Build & Test.
+RUN mkdir -p build
+WORKDIR /openspiel/build
+RUN cmake -DPython3_EXECUTABLE=`which python3` -DCMAKE_CXX_COMPILER=`which clang++` ../open_spiel
+RUN make -j12
+ENV PYTHONPATH=${PYTHONPATH}:/openspiel/
+ENV PYTHONPATH=${PYTHONPATH}:/openspiel/build/python/
+# RUN ctest -j12
+
+# Installs known working version of bazel.
+ARG bazel_version=3.7.2
+ENV BAZEL_VERSION ${bazel_version}
+RUN mkdir /bazel && \
+    cd /bazel && \
+    curl -fSsL -O https://github.com/bazelbuild/bazel/releases/download/$BAZEL_VERSION/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh && \
+    chmod +x bazel-*.sh && \
+    ./bazel-$BAZEL_VERSION-installer-linux-x86_64.sh && \
+    cd / && \
+    rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
+
+# LaunchPad.
+WORKDIR /
+RUN mkdir -p launchpad
+RUN git clone https://github.com/deepmind/launchpad.git
+WORKDIR /launchpad/
+RUN pip install tensorflow
+RUN ./oss_build.sh --python 3.8
+
+# MARL
+WORKDIR /
+RUN mkdir -p /marl/
+WORKDIR /marl/
+COPY . .
+# RUN pip install --upgrade dm-launchpad
+# RUN pip install --upgrade -r requirements.txt
+# RUN pip install -e .
