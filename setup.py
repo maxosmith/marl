@@ -5,10 +5,10 @@ from setuptools import setup
 
 setup(
     name="marl",
-    version="0.0.1",
+    version="0.0.2",
     description="Multiagent Reinforcement Learning building blocks.",
     author="Max Smith",
-    packages=["marl", "marl_experiments"],
+    packages=["marl"],
     classifiers=[
         "Environment :: Console",
         "Intended Audience :: Science/Research",

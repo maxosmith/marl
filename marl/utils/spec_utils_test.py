@@ -1,52 +1,42 @@
+"""Tests for train_arena."""
 import numpy as np
 from absl.testing import absltest, parameterized
 
-from marl import worlds
-from marl.utils import spec_utils
+from marl import specs, types
+from marl.utils import spec_utils, tree_utils
 
 
 class SpecUtilsTest(parameterized.TestCase):
-    @parameterized.named_parameters(
-        [
-            dict(
-                testcase_name="Array",
-                data=np.ones([3], dtype=int),
-                data_spec=worlds.ArraySpec(shape=[3], dtype=int),
-            ),
-            dict(
-                testcase_name="Tensor",
-                data=np.ones([3, 4, 5], dtype=int),
-                data_spec=worlds.ArraySpec(shape=[3, 4, 5], dtype=int),
-            ),
-            dict(
-                testcase_name="Heterogeneous List",
-                data=[np.ones([3], dtype=int), np.ones([3, 4, 5], dtype=float)],
-                data_spec=[worlds.ArraySpec(shape=[3], dtype=int), worlds.ArraySpec(shape=[3, 4, 5], dtype=float)],
-            ),
-            dict(
-                testcase_name="Homogeneous List",
-                data=[np.ones([3, 4, 5], dtype=float), np.ones([3, 4, 5], dtype=float)],
-                data_spec=[worlds.ArraySpec(shape=[3, 4, 5], dtype=float), worlds.ArraySpec(shape=[3, 4, 5], dtype=float)],
-            ),
-            dict(
-                testcase_name="Dictionary",
-                data=dict(x=np.ones([3], dtype=int), y=np.ones([3], dtype=float)),
-                data_spec=dict(x=worlds.ArraySpec(shape=[3], dtype=int), y=worlds.ArraySpec(shape=[3], dtype=float)),
-            ),
-            dict(
-                testcase_name="Tree",
-                data=dict(x=np.ones([3], dtype=int), y=[np.ones([3], dtype=float), np.ones([3], dtype=float)]),
-                data_spec=dict(
-                    x=worlds.ArraySpec(shape=[3], dtype=int),
-                    y=[worlds.ArraySpec(shape=[3], dtype=float), worlds.ArraySpec(shape=[3], dtype=float)],
-                ),
-            ),
-        ]
-    )
-    def test_make_tree_spec(self, data, data_spec):
-        result = spec_utils.make_tree_spec(data)
-        spec_utils.assert_equal_tree_specs(result, data_spec)
+
+  @parameterized.parameters(
+      dict(
+          data=(),
+          spec=(),
+      ),
+      dict(
+          data=1.0,
+          spec=specs.ArraySpec((), np.float64),
+      ),
+      dict(
+          data=(1.0, 1),
+          spec=(specs.ArraySpec((), np.float64), specs.ArraySpec((), np.int64)),
+      ),
+      dict(
+          data=(1.0, dict(x=1, y="hello")),
+          spec=(
+              specs.ArraySpec((), np.float64),
+              dict(
+                  x=specs.ArraySpec((), np.int64),
+                  y=specs.ArraySpec((), np.dtype("<U5")),
+              ),
+          ),
+      ),
+  )
+  def test_spec_like(self, data: types.Tree, spec: specs.TreeSpec):
+    """Test cases for `spec_like`."""
+    print(spec_utils.spec_like(data))
+    tree_utils.assert_equals(spec, spec_utils.spec_like(data))
 
 
 if __name__ == "__main__":
-    absltest.main()
+  absltest.main()

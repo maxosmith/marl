@@ -1,8 +1,0 @@
-# Multiagent Reinforcement Learning
-
-
-## Docker
-
-`docker build --target base -t marl -f Dockerfile.base .`
-
-`docker run -it --entrypoint /bin/bash marl`
