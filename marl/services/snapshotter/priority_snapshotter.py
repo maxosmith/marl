@@ -15,6 +15,11 @@ class PrioritySnapshotter:
   Maintains the top `max_to_keep` snapshots on disk, according to their priority.
   Notably, unlike Snapshotter, this service is not a worker and expects explicit
   requests to save.
+
+  TODO(max):
+    - Right now this Snapshotter does not work as a service like `Snapshotter`. Modify
+      `PrioritySnapshotter` to optionally take a client that provides priorities when queried.
+    - Also need to update `snapshot_template` to behave similarly across Snapshotters.
   """
 
   def __init__(
@@ -54,7 +59,7 @@ class PrioritySnapshotter:
       return
 
     # Save if aren't at capacity yet.
-    if len(self._snapshots) < self._max_to_keep:
+    if (self._max_to_keep is None) or (len(self._snapshots) < self._max_to_keep):
       heapq.heappush(self._snapshots, (priority, snapshot_location))
       self._save(snapshot_location=snapshot_location, params=params)
       return

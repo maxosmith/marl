@@ -5,21 +5,23 @@ from typing import Dict, Optional
 
 from absl import logging
 
-from marl.services import interfaces, variable_client
+from marl.services import interfaces
 from marl.services.snapshotter import utils
 from marl.utils import file_utils, signals
 
+_SEC_PER_MIN = 60
 
-class Snapshotter(interfaces.WorkerInterface):
+
+class Snapshotter(interfaces.Worker):
   """Periodically fetches new version of params and saves them to disk."""
 
   def __init__(
       self,
-      variable_source: variable_client.VariableClient,
+      variable_source: interfaces.VariableSource,
       snapshot_templates: Dict[str, utils.Snapshot],
       directory: str,
       max_to_keep: Optional[int] = None,
-      save_frequency: int = 5,
+      save_frequency_mins: int | float = 5,
   ):
     """Initializes an instance of `Snapshotter`.
 
@@ -30,24 +32,21 @@ class Snapshotter(interfaces.WorkerInterface):
             to build `Snapshot`s (the non-`param` fields).
         directory: Directory that snapshots are stored in.
         max_to_keep: Maximum number of each snapshot to keep on disk.
-        snapshot_frequency: Frequency, in minutes, to save a snapshot.
+        snapshot_frequency_mins: Frequency, in minutes, to save a snapshot.
     """
     self._variable_source = variable_source
     self._snapshot_templates = snapshot_templates
     self._path = directory
     self._max_to_keep = max_to_keep
     self._snapshot_paths: Optional[Dict[str, str]] = None
-    self._save_frequency = save_frequency
+    self._save_frequency_mins = save_frequency_mins
     self._stop = False
 
   def _signal_handler(self):
     """Handle preemption signal. Note that this must happen in the main thread."""
-    logging.info("Caught SIGTERM: forcing models save.")
-    # TODO(maxsmith): Cannot wait on saving if resources are dead.
-    # self._save()
     self._stop = True
 
-  def _save(self):
+  def save(self):
     if not self._snapshot_paths:
       # Lazy discovery of already existing snapshots.
       self._snapshot_paths = file_utils.get_subdirs(self._path)
@@ -79,17 +78,15 @@ class Snapshotter(interfaces.WorkerInterface):
   def run(self):
     """Runs the saver."""
     with signals.runtime_terminator(self._signal_handler):
-      logging.info("Context")
-
       while True:
         if self._stop:
           break
 
-        self._save()
-        logging.info("Wait")
-        time.sleep(self._save_frequency * 60)
-    logging.info("Out of Context")
+        self.save()
+        time.sleep(self._save_frequency_mins * _SEC_PER_MIN)
+      logging.info("Snapshotter's run ended.")
 
   def stop(self):
     """Manually stop the worker."""
+    logging.info("Snapshotter requested to stop.")
     self._stop = True
