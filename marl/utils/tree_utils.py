@@ -173,7 +173,7 @@ def assert_equals(x: types.Tree, y: types.Tree) -> None:
       TypeError: if the two structures differ in their type.
   """
   tree.assert_same_structure(x, y)
-  tree.map_structure(np.testing.assert_equal, x, y)
+  tree.map_structure(np.testing.assert_array_equal, x, y)
 
 
 def assert_almost_equals(x: types.Tree, y: types.Tree, **kwargs) -> None:
