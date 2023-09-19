@@ -71,7 +71,7 @@ class LearnPolicyTest(parameterized.TestCase):
     Args:
       expected_variables: List of the agent's variables that the agent is
         expected to pull from each call to StubVariableClient.
-      expected_actions: Expected actions that the agent will take.
+      expected_actions: Expected actions that an agent will take.
     """
     agent = learner_policy.LearnerPolicy(
         policy=_POLICY,

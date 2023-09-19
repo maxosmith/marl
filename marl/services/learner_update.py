@@ -109,10 +109,10 @@ class LearnerUpdate:
       updates, new_opt_state = optimizer.update(gradients, opt_state)
       new_params = optax.apply_updates(params, updates)
 
-      # metrics.update({
-      #     "param_norm": optax.global_norm(new_params),
-      #     "param_updates_norm": optax.global_norm(updates),
-      # })
+      metrics.update({
+          "param_norm": optax.global_norm(new_params),
+          "param_updates_norm": optax.global_norm(updates),
+      })
       new_state = TrainingState(
           params=new_params, opt_state=new_opt_state, rng_key=rng_key
       )

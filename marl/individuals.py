@@ -9,7 +9,9 @@ class Individual(abc.ABC):
 
   @abc.abstractmethod
   def step(
-      self, timestep: worlds.TimeStep, state: types.State
+      self,
+      state: types.State,
+      timestep: worlds.TimeStep,
   ) -> Tuple[types.Action, types.State]:
     """Selects an action to take given the current timestep."""
 

@@ -14,7 +14,6 @@ from absl import logging
 from marl import specs, types, worlds
 from marl.services.replays import base_adder, priority
 
-DEFAULT_PRIORITY_TABLE = "priority_table"
 _MIN_WRITER_LIFESPAN_SECONDS = 60
 
 
@@ -56,7 +55,7 @@ class ReverbAdder(base_adder.BaseAdder):
     if priority_fns:
       priority_fns = dict(priority_fns)
     else:
-      priority_fns = {DEFAULT_PRIORITY_TABLE: None}
+      priority_fns = {priority.DEFAULT_PRIORITY_TABLE: None}
 
     self._client = client
     self._priority_fns = priority_fns

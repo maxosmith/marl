@@ -9,6 +9,7 @@ from absl.testing import absltest
 
 from marl import specs, worlds
 from marl.services.replays import end_behavior as end_behavior_lib
+from marl.services.replays import priority
 from marl.services.replays.reverb.adders import reverb_adder
 from marl.utils import tree_utils
 
@@ -80,12 +81,12 @@ class ReverbAdderTestMixin(absltest.TestCase):
   def setUpClass(cls):
     super().setUpClass()
 
-    replay_table = reverb.Table.queue(reverb_adder.DEFAULT_PRIORITY_TABLE, 1000)
+    replay_table = reverb.Table.queue(priority.DEFAULT_PRIORITY_TABLE, 1000)
     cls.server = reverb.Server([replay_table])
     cls.client = reverb.Client(f"localhost:{cls.server.port}")
 
   def tearDown(self):
-    self.client.reset(reverb_adder.DEFAULT_PRIORITY_TABLE)
+    self.client.reset(priority.DEFAULT_PRIORITY_TABLE)
     super().tearDown()
 
   @classmethod
@@ -94,16 +95,16 @@ class ReverbAdderTestMixin(absltest.TestCase):
     super().tearDownClass()
 
   def num_episodes(self):
-    info = self.client.server_info(1)[reverb_adder.DEFAULT_PRIORITY_TABLE]
+    info = self.client.server_info(1)[priority.DEFAULT_PRIORITY_TABLE]
     return info.num_episodes
 
   def num_items(self):
-    info = self.client.server_info(1)[reverb_adder.DEFAULT_PRIORITY_TABLE]
+    info = self.client.server_info(1)[priority.DEFAULT_PRIORITY_TABLE]
     return info.current_size
 
   def items(self):
     sampler = self.client.sample(
-        table=reverb_adder.DEFAULT_PRIORITY_TABLE,
+        table=priority.DEFAULT_PRIORITY_TABLE,
         num_samples=self.num_items(),
         emit_timesteps=False,
     )
