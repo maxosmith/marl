@@ -3,7 +3,7 @@ import enum
 
 import numpy as np
 
-from marl import types, worlds
+from marl import specs, types, worlds
 
 
 class RockPaperScissorsActions(enum.IntEnum):
@@ -78,22 +78,22 @@ class RockPaperScissors(worlds.Game):
         ),
     }
 
-  def reward_specs(self) -> worlds.PlayerIDToSpec:
+  def reward_specs(self) -> specs.PlayerIDToSpec:
     """Describes the reward returned by the environment."""
     return {
-        id: worlds.ArraySpec(shape=(), dtype=np.float32, name="reward") for id in range(RockPaperScissors._NUM_PLAYERS)
+        id: specs.ArraySpec(shape=(), dtype=np.float32, name="reward") for id in range(RockPaperScissors._NUM_PLAYERS)
     }
 
-  def observation_specs(self) -> worlds.PlayerIDToSpec:
+  def observation_specs(self) -> specs.PlayerIDToSpec:
     """Describes the observations provided by the environment."""
     return {
-        id: worlds.ArraySpec(shape=(6,), dtype=np.int32, name="observation")
+        id: specs.ArraySpec(shape=(6,), dtype=np.int32, name="observation")
         for id in range(RockPaperScissors._NUM_PLAYERS)
     }
 
-  def action_specs(self) -> worlds.PlayerIDToSpec:
+  def action_specs(self) -> specs.PlayerIDToSpec:
     """Describes the actions that should be provided to `step`."""
     return {
-        id: worlds.DiscreteArraySpec(dtype=np.int32, num_values=3, name="action")
+        id: specs.DiscreteArraySpec(dtype=np.int32, num_values=3, name="action")
         for id in range(RockPaperScissors._NUM_PLAYERS)
     }

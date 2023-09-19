@@ -2,6 +2,7 @@ import numpy as np
 from absl.testing import absltest, parameterized
 
 import marl
+from marl import types, worlds
 from marl.games import rock_paper_scissors
 
 _ROCK = rock_paper_scissors.RockPaperScissorsActions.ROCK.value
@@ -13,16 +14,16 @@ class RockPaperScissorsTest(parameterized.TestCase):
   """Test cases for the `RockPaperScissors` game."""
 
   @parameterized.parameters(1, 2, 5)
-  def test_init(self, num_stages):
-    """Test RckPaperScissor's init method."""
+  def test_init(self, num_stages: int):
+    """Test init method."""
     game = rock_paper_scissors.RockPaperScissors(num_stages=num_stages)
     timesteps = game.reset()
-    assert np.all([ts.first() for ts in timesteps.values()])
+    self.assertTrue(np.all([ts.first() for ts in timesteps.values()]))
     for _ in range(num_stages - 1):
       timesteps = game.step({0: 0, 1: 0})
-      assert np.all([ts.mid() for ts in timesteps.values()])
+      self.assertTrue(np.all([ts.mid() for ts in timesteps.values()]))
     timesteps = game.step({0: 0, 1: 0})
-    assert np.all([ts.last() for ts in timesteps.values()])
+    self.assertTrue(np.all([ts.last() for ts in timesteps.values()]))
 
   @parameterized.parameters(
       dict(
@@ -89,13 +90,20 @@ class RockPaperScissorsTest(parameterized.TestCase):
           observation=[0, 0, 1, 0, 1, 0],
       ),
   )
-  def test_step(self, action0, action1, reward0, reward1, observation):
-    """Test RockPaperScissor's step method."""
+  def test_step(
+      self,
+      action0: rock_paper_scissors.RockPaperScissorsActions,
+      action1: rock_paper_scissors.RockPaperScissorsActions,
+      reward0: float,
+      reward1: float,
+      observation: types.Array,
+  ):
+    """Test step method."""
     game = rock_paper_scissors.RockPaperScissors(num_stages=1)
     _ = game.reset()
     timesteps = game.step({0: action0, 1: action1})
-    assert timesteps[0].reward == reward0
-    assert timesteps[1].reward == reward1
+    self.assertEqual(timesteps[0].reward, reward0)
+    self.assertEqual(timesteps[1].reward, reward1)
     np.testing.assert_array_equal(timesteps[0].observation, observation)
     np.testing.assert_array_equal(timesteps[1].observation, observation)
 
@@ -103,37 +111,41 @@ class RockPaperScissorsTest(parameterized.TestCase):
     """Test RockPaperScissor's reset method."""
     game = rock_paper_scissors.RockPaperScissors(num_stages=1)
     timesteps = game.reset()
-    assert len(timesteps) == 2
-    assert (0 in timesteps) and (1 in timesteps)
+    self.assertLen(timesteps, 2)
+    self.assertIn(0, timesteps)
+    self.assertIn(1, timesteps)
     for timestep in timesteps.values():
-      assert timestep.step_type == marl.StepType.FIRST
-      assert timestep.reward == 0.0
+      self.assertEqual(timestep.step_type, worlds.StepType.FIRST)
+      self.assertEqual(timestep.reward, 0.0)
       np.testing.assert_array_equal(timestep.observation, np.zeros((6,), dtype=int))
 
   def test_specs(self):
-    """Test RockPaperScissor's {reward/observation/action}_spec."""
+    """Test RockPaperScissor's {reward|observation|action}_spec."""
     game = rock_paper_scissors.RockPaperScissors(num_stages=1)
 
     # Reward.
     reward_specs = game.reward_specs()
-    assert (0 in reward_specs) and (1 in reward_specs)
+    self.assertIn(0, reward_specs)
+    self.assertIn(1, reward_specs)
     for spec in reward_specs.values():
-      assert spec.shape == ()
-      assert spec.dtype == float
+      self.assertEqual(spec.shape, ())
+      self.assertEqual(spec.dtype, np.float32)
 
     # Observation.
     obs_specs = game.observation_specs()
-    assert (0 in obs_specs) and (1 in obs_specs)
+    self.assertIn(0, obs_specs)
+    self.assertIn(1, obs_specs)
     for spec in obs_specs.values():
-      assert spec.shape == (6,)
-      assert spec.dtype == int
+      self.assertEqual(spec.shape, (6,))
+      self.assertEqual(spec.dtype, np.int32)
 
     # Action.
     action_specs = game.action_specs()
-    assert (0 in action_specs) and (1 in action_specs)
+    self.assertIn(0, action_specs)
+    self.assertIn(1, action_specs)
     for spec in action_specs.values():
-      assert spec.shape == ()
-      assert spec.dtype == int
+      self.assertEqual(spec.shape, ())
+      self.assertEqual(spec.dtype, np.int32)
 
 
 if __name__ == "__main__":
