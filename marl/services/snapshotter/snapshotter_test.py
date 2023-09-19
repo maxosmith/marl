@@ -7,7 +7,6 @@ from typing import Any, Mapping
 
 import jax
 import jax.numpy as jnp
-import tree
 from absl.testing import absltest, parameterized
 
 from marl import types
