@@ -28,46 +28,46 @@ _TEST_CASES = (
 
 
 class ActionSequenceBotTest(parameterized.TestCase):
-  """Test suite for `ActionSequenceBot`."""
+    """Test suite for `ActionSequenceBot`."""
 
-  @parameterized.parameters(*_TEST_CASES)
-  def test_step(
-      self,
-      action_sequence: Sequence[types.Action],
-      expected_sequence: Sequence[types.Action],
-  ):
-    """Test the bot's `step` method."""
-    bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
-    state = bot.episode_reset(None)
-    for expected_action in expected_sequence:
-      taken_action, state = bot.step(None, state)
-      tree_utils.assert_equals(taken_action, expected_action)
+    @parameterized.parameters(*_TEST_CASES)
+    def test_step(
+        self,
+        action_sequence: Sequence[types.Action],
+        expected_sequence: Sequence[types.Action],
+    ):
+        """Test the bot's `step` method."""
+        bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
+        state = bot.episode_reset(None)
+        for expected_action in expected_sequence:
+            taken_action, state = bot.step(state, None)
+            tree_utils.assert_equals(taken_action, expected_action)
 
-  @parameterized.parameters(*_TEST_CASES)
-  def test_reset_sequence(
-      self,
-      action_sequence: Sequence[types.Action],
-      expected_sequence: Sequence[types.Action],
-  ):
-    """Test the bot resets its sequence with the episode."""
-    bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
-    for _ in expected_sequence:
-      state = bot.episode_reset(None)
-      taken_action, state = bot.step(None, state)
-      tree_utils.assert_equals(taken_action, expected_sequence[0])
+    @parameterized.parameters(*_TEST_CASES)
+    def test_reset_sequence(
+        self,
+        action_sequence: Sequence[types.Action],
+        expected_sequence: Sequence[types.Action],
+    ):
+        """Test the bot resets its sequence with the episode."""
+        bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
+        for _ in expected_sequence:
+            state = bot.episode_reset(None)
+            taken_action, state = bot.step(state, None)
+            tree_utils.assert_equals(taken_action, expected_sequence[0])
 
-  @parameterized.parameters(*_TEST_CASES)
-  def test_episode_reset(
-      self,
-      action_sequence: Sequence[types.Action],
-      expected_sequence: Sequence[types.Action],
-  ):
-    """Test the bot's `episode_reset` method."""
-    del expected_sequence  # Used by `test_step`.
-    bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
-    initial_state = bot.episode_reset(None)
-    tree_utils.assert_equals(initial_state, ())
+    @parameterized.parameters(*_TEST_CASES)
+    def test_episode_reset(
+        self,
+        action_sequence: Sequence[types.Action],
+        expected_sequence: Sequence[types.Action],
+    ):
+        """Test the bot's `episode_reset` method."""
+        del expected_sequence  # Used by `test_step`.
+        bot = action_sequence_bot.ActionSequenceBot(sequence=action_sequence)
+        initial_state = bot.episode_reset(None)
+        tree_utils.assert_equals(initial_state, ())
 
 
 if __name__ == "__main__":
-  absltest.main()
+    absltest.main()
