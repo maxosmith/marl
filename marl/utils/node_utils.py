@@ -20,7 +20,7 @@ def build_courier_node(
   """
 
   def _decorate(fn_: Callable[..., Any]):
-    """Decoration closure."""
+    """Decoration closure for the args/kwargs."""
 
     @functools.wraps(fn_)
     def _wrapped_fn(*args, **kwargs):
