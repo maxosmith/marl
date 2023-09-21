@@ -1,8 +1,0 @@
-{
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
-    "black-formatter.path": [
-        "/Users/maxsmith/mambaforge/envs/py310/bin/pyink"
-    ]
-}

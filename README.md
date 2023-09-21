@@ -1,32 +1,55 @@
 # Multiagent Reinforcement Learning
+Library of modules/blueprints commonly prevalent in (multiagent) reinforcement learning.
+The goal of this project is to provide access to these independent modules without significant layers of engineering ontop of them that may obfuscate their interactions.
+Thereby enabling practioners to adopt a _copy-modify-compose_ design methodology, facilitating rapid development of new algorithms..
 
 
-## Docker
+## Installation
 
-`docker build --target base -t marl -f Dockerfile.base .`
-
-`docker run marl python /openspiel/open_spiel/python/examples/matrix_game_example.py`
-
-`docker run -it --entrypoint /bin/bash marl`
-
-
-The Docker build files and directions are largely taken from `Launchpad`
-
-Build the Docker container to be used for compiling and testing. You can specify `tensorflow_pip` parameter to set the version of Tensorflow to build against. You can also specify which version(s) of Python container should support. The command below enables support for Python 3.7, 3.8, 3.9 and 3.10.
-```bash
-docker build --tag marl -f docker/build.dockerfile .
-
-```
-```bash
-docker build --tag marl --platform linux/amd64 -f docker/build.dockerfile .
-```
-
-The next step is to enter the built Docker image, binding sources to `/tmp/` within the container.
-```bash
-docker run --rm --mount "type=bind,src=$PWD,dst=/tmp/marl" \
-  -it marl bash
-```
+### Linux
 
 ```bash
-/tmp/launchpad/oss_build.sh --tf_package "tensorflow==2.9.*" --reverb_package "dm-reverb==0.7.2"
+# Set-up environment.
+conda create -n py39
+conda activate py39
+conda install python=3.9 -c conda-forge
+pip install requirements/linux.txt
+pip install dm-reverb dm-launchpad
 ```
+
+### Mac OS
+Setting up LaunchPad for local usage is possible thanks largely to the effort of @cemlyn007.
+```bash
+# Set-up environment.
+conda create -n py39
+conda activate py39
+conda install python=3.9 -c conda-forge
+pip install requirements/mac.txt
+
+# Install Bazelisk to build packages.
+go get github.com/bazelbuild/bazelisk
+go install github.com/bazelbuild/bazelisk@latest
+export PATH=$PATH:$(go env GOPATH)/bin
+
+# Install Reverb.
+git clone https://github.com/google-deepmind/reverb
+cd reverb
+gh pr checkout 128
+./oss_build.sh --release
+cd ..
+
+# Install LaunchPad.
+git clone https://github.com/google-deepmind/launchpad
+cd launchpad
+gh pr checkout 40
+./oss_build.sh --release
+cd ..
+```
+
+There is one sharp-bit about this currently patchy solution to running on MacOS.
+Tensorflow needs to be imported _before_ LaunchPad.
+Please see discussion at https://github.com/google-deepmind/reverb/pull/128.
+
+
+### Developer
+Developers should additionally install the packages found in `requirements/mac.txt`.
