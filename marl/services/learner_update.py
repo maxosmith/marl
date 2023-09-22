@@ -14,9 +14,8 @@ from absl import logging
 
 from marl import specs, types, worlds
 from marl.services import counter as counter_lib
-from marl.services.arenas import loggers
 from marl.services.replays.reverb import prefetch_client
-from marl.utils import distributed_utils, spec_utils, stopwatch
+from marl.utils import distributed_utils, loggers, spec_utils, stopwatch
 
 
 class TrainingState(NamedTuple):

@@ -3,8 +3,7 @@ import dataclasses
 from typing import Any, Callable, Optional, Sequence, Tuple
 
 from marl import individuals, specs, types, worlds
-from marl.services.arenas import loggers
-from marl.utils import tree_utils
+from marl.utils import loggers, tree_utils
 
 TWO_STEP_TRAJ = (
     {

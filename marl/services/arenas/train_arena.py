@@ -9,8 +9,8 @@ import tree
 from absl import logging
 
 from marl import types
-from marl.services.arenas import base_arena, loggers
-from marl.utils import dict_utils, tree_utils
+from marl.services.arenas import base_arena
+from marl.utils import dict_utils, loggers, tree_utils
 
 _StopFn = Callable[[int, int], bool]
 

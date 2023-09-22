@@ -30,9 +30,7 @@ def runtime_terminator(callback: Optional[_Handler] = None):
     logging.info("Received termination signal.")
     if callback:
       callback()
-    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-        ctypes.c_long(worker_id), ctypes.py_object(SystemExit)
-    )
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(worker_id), ctypes.py_object(SystemExit))
     assert res < 2, "Stopping worker failed"
 
   launchpad.register_stop_handler(signal_handler)

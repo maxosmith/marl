@@ -1,6 +1,5 @@
 """Interface for servies that simulate episodes."""
 import dataclasses
-import itertools
 import operator
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence, Union
 
@@ -9,10 +8,8 @@ import tree
 from absl import logging
 
 from marl import types, worlds
-from marl.services.arenas import base_arena, loggers
-from marl.utils import dict_utils, tree_utils
-
-_StopFn = Callable[[int, int], bool]
+from marl.services.arenas import base_arena
+from marl.utils import dict_utils, loggers, tree_utils
 
 
 class EpisodeResult(NamedTuple):
