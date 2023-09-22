@@ -1,5 +1,9 @@
-# pylint: disable=unused-import
+from .action_sequence_bot import ActionSequenceBot
+from .constant_action_bot import ConstantActionBot
+from .random_action_bot import RandomActionBot
 
-from marl.bots.constant import ConstantIntAction
-from marl.bots.random import RandomIntAction
-from marl.bots.script import Script
+__all__ = (
+    "ActionSequenceBot",
+    "ConstantActionBot",
+    "RandomActionBot",
+)
