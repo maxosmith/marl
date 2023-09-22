@@ -1,7 +1,6 @@
 import numpy as np
 from absl.testing import absltest, parameterized
 
-import marl
 from marl import types, worlds
 from marl.games import rock_paper_scissors
 

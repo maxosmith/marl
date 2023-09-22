@@ -7,7 +7,7 @@ from absl.testing import absltest, parameterized
 from marl.utils import array_utils
 
 
-class YourModuleNameTest(parameterized.TestCase):
+class ArrayUtilsTest(parameterized.TestCase):
   """Test suite for `array_utils`."""
 
   @parameterized.parameters(
