@@ -26,7 +26,7 @@ class ActionSequenceBot(individuals.Bot):
     self._t += 1
     return state, action
 
-  def episode_reset(self, timestep: worlds.TimeStep):
+  def episode_reset(self, timestep: worlds.TimeStep) -> types.State:
     """Resets the agent's episodic state."""
     del timestep
     self._t = 0

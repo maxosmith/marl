@@ -23,7 +23,7 @@ class RandomActionBot(individuals.Bot):
     del timestep
     return state, self._rng.choice(self._num_actions)
 
-  def episode_reset(self, timestep: worlds.TimeStep):
+  def episode_reset(self, timestep: worlds.TimeStep) -> types.State:
     """Resets the agent's episodic state."""
     del timestep
     return ()

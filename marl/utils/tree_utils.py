@@ -1,5 +1,4 @@
 """Tree, arbitrarily nested structures, utility functions."""
-import operator
 from typing import Any, List, Mapping, Optional, Sequence
 
 import jax
