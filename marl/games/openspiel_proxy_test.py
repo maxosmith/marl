@@ -83,6 +83,14 @@ class OpenSpielProxyRPSTest(parameterized.TestCase):
     self.assertEqual(worlds.StepType.LAST, timesteps[0].step_type)
     self.assertEqual(worlds.StepType.LAST, timesteps[1].step_type)
 
+  def test_sequential_game(self):
+    """Test games with sequential actions."""
+    game = openspiel_proxy.OpenSpielProxy("kuhn_poker")
+    timesteps = game.reset()
+    self.assertIn(0, timesteps)
+    timesteps = game.step({0: 0})
+    self.assertIn(1, timesteps)
+
 
 if __name__ == "__main__":
   absltest.main()

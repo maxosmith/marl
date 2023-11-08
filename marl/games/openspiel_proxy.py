@@ -59,7 +59,7 @@ class OpenSpielProxy(worlds.Game):
 
   def step(self, actions: types.PlayerIDToAction) -> worlds.PlayerIDToTimestep:
     """Updates the game according to eahc players' action."""
-    actions = list(actions[player_id] for player_id in range(self._num_players))
+    actions = list(actions[player_id] for player_id in range(self._num_players) if player_id in actions)
     timesteps = self._game.step(actions)
     timesteps = self._convert_openspiel_timestep(timesteps)
     return timesteps
