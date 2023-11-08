@@ -1,7 +1,6 @@
 """Tests for sim_arena."""
 from absl.testing import absltest, parameterized
 
-from marl import bots, worlds
 from marl.services.arenas import sim_arena, test_utils
 from marl.utils import tree_utils
 

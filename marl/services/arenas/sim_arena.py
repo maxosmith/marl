@@ -1,7 +1,7 @@
 """Arena meant for evaluation between agents that are fixed."""
 import dataclasses
 import operator
-from typing import NamedTuple, Sequence
+from typing import NamedTuple, Optional, Sequence
 
 import numpy as np
 import tree
@@ -46,33 +46,49 @@ class SimArena(base_arena.BaseArena):
     results = self.run_episodes(players=players, num_episodes=num_episodes)
     return (profile, tree.map_structure(lambda *args: np.stack(args), *results))
 
-  def run(self, players, *, num_episodes) -> Sequence[EpisodeResult]:
+  def run(
+      self,
+      players,
+      *,
+      num_episodes: Optional[int] = None,
+      num_timesteps: Optional[int] = None,
+      **kwargs,
+  ) -> Sequence[EpisodeResult]:
     """Run many episodes."""
+    del kwargs
+    if num_timesteps is not None:
+      raise ValueError("SimArena only supports episodic simulation.")
     return [self.run_episode(players) for _ in range(num_episodes)]
 
   def run_episode(self, players) -> EpisodeResult:
     """Run one episode."""
+    player_states = {}
     timesteps = self.game.reset()
-    player_states = {id: player.episode_reset(timesteps[id]) for id, player in players.items()}
 
     # Initialize logging statistics.
     episode_length = 0
-    episode_return = {id: ts.reward for id, ts in timesteps.items()}
+    episode_return = {}
+    for player_id, player_ts in timesteps.items():
+      episode_return[player_id] = player_ts.reward
 
     while not np.all([ts.last() for ts in timesteps.values()]):
       # Action selection.
       actions = {}
-      for id, player in players.items():
-        player_states[id], actions[id] = player.step(player_states[id], timesteps[id])
+      for player_id, player_ts in timesteps.items():
+        if player_id not in player_states:
+          player_states[player_id] = players[player_id].episode_reset(player_ts)
+        player_states[player_id], actions[player_id] = players[player_id].step(player_states[player_id], player_ts)
 
       # Transition game state.
       timesteps = self.game.step(actions)
       episode_length += 1
-      episode_return = tree.map_structure(
-          operator.iadd,
-          episode_return,
-          {id: ts.reward for id, ts in timesteps.items()},
-      )
+
+      # Record transition data.
+      for player_id, player_ts in timesteps.items():
+        if player_id not in episode_return:
+          episode_return[player_id] = player_ts.reward
+        else:
+          episode_return[player_id] = tree.map_structure(operator.iadd, episode_return[player_id], player_ts.reward)
 
     return EpisodeResult(
         episode_length=episode_length,
