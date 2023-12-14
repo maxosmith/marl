@@ -12,12 +12,12 @@ class Individual(abc.ABC):
       self,
       state: types.State,
       timestep: worlds.TimeStep,
-  ) -> Tuple[types.Action, types.State]:
-    """Selects an action to take given the current timestep."""
+  ) -> Tuple[types.State, types.Action]:
+    """Select an action to take given the current timestep."""
 
   @abc.abstractmethod
   def episode_reset(self, timestep: worlds.TimeStep):
-    """Resets the agent's episodic state."""
+    """Reset the agent's episodic state."""
 
 
 class Bot(Individual):

@@ -1,15 +1,13 @@
 """A learning agent's policy."""
-import functools
 import warnings
 from typing import Optional
 
 import flax.linen as nn
 import jax
-import tree
 from absl import logging
 
 from marl import individuals, types, worlds
-from marl.services import variable_client
+from marl.services import variable_client as variable_client_lib
 from marl.utils import tree_utils
 
 
@@ -35,16 +33,16 @@ class LearnerPolicy(individuals.Agent):
   def __init__(
       self,
       policy: nn.Module,
-      variable_client: variable_client.VariableClient,
+      variable_client: variable_client_lib.VariableClient,
       rng_key: jax.random.PRNGKey,
-      backend: Optional[str] = "cpu",
+      backend: str | None = "cpu",
       *,
       episode_update_freq: int | None = 1,
       timestep_update_freq: int | None = None,
       blocking_wait: bool = True,
   ):
     """Initializer."""
-    logging.info(f"Initializing a learner's policy with backend {backend}.")
+    logging.info("Initializing a learner's policy with backend %s.", backend)
     self._variable_client = variable_client
     self._rng_key = rng_key
 
@@ -68,13 +66,11 @@ class LearnerPolicy(individuals.Agent):
     self._backend = backend
     self._device = jax.local_devices(backend=self._backend)
     if len(self._device) > 1:
-      warnings.warn(
-          f"Found {len(self._device)} devices, but only using {self._device[0]}"
-      )
+      warnings.warn(f"Found {len(self._device)} devices, but only using {self._device[0]}")
     self._device = self._device[0]
     self._policy_apply = jax.jit(self._policy.apply, device=self._device)
 
-  def step(self, timestep: worlds.TimeStep, state: Optional[types.State] = None):
+  def step(self, state: Optional[types.State], timestep: worlds.TimeStep):
     """Policy step."""
     if self._timestep_update_freq:
       self._num_timesteps += 1
