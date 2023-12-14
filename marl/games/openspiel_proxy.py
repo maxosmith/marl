@@ -86,11 +86,9 @@ class OpenSpielProxy(worlds.Game):
   def action_specs(self) -> specs.PlayerIDToSpec:
     """Describes the actions that should be provided to `step`."""
     openspiel_spec = self._game.action_spec()
-    spec = specs.BoundedArraySpec(
-        shape=(),
+    spec = specs.DiscreteArraySpec(
         dtype=np.int32,
-        minimum=openspiel_spec["min"],
-        maximum=openspiel_spec["max"],
+        num_values=openspiel_spec["num_actions"],
         name="action",
     )
     return {id: spec for id in range(self._num_players)}
