@@ -50,9 +50,11 @@ class OpenSpielProxy(worlds.Game):
     self._game = rl_environment.Environment(self._game, include_full_state=include_full_state)
 
     self._num_players = self._game.num_players
+    self._had_first_timestep = None
 
   def reset(self) -> worlds.PlayerIDToTimestep:
     """Reset the game to it's initial state."""
+    self._had_first_timestep = {pid: False for pid in range(self._num_players)}
     timesteps = self._game.reset()
     timesteps = self._convert_openspiel_timestep(timesteps)
     return timesteps
@@ -99,7 +101,7 @@ class OpenSpielProxy(worlds.Game):
     current_player = timesteps.observations[_CURRENT_PLAYER]
     del timesteps.observations[_CURRENT_PLAYER]
 
-    # Remove serialized state from observations as default, since JAX graphs cannot handle strings.
+    # Optionally, cacche serialized_state.
     serialized_state = None
     if SERIALIZED_STATE in timesteps.observations:
       serialized_state = timesteps.observations[SERIALIZED_STATE]
@@ -128,20 +130,28 @@ class OpenSpielProxy(worlds.Game):
       rewards = np.zeros(self._num_players, dtype=np.float32)
 
     step_type = worlds.StepType(timesteps.step_type.value)
-    converted_timesteps = {
-        id: worlds.TimeStep(step_type=step_type, reward=rewards[id], observation=observations[id])
-        for id in range(self._num_players)
-    }
+    converted_timesteps = {}
+    for player in range(self._num_players):
+      converted_timesteps[player] = worlds.TimeStep(
+          step_type=step_type if self._had_first_timestep[player] else worlds.StepType.FIRST,
+          reward=rewards[player],
+          observation=observations[player],
+      )
 
     if current_player in [TurnId.SIMULTANEOUS, TurnId.TERMINAL]:
-      return converted_timesteps
+      pass
     elif current_player == TurnId.CHANCE:
       raise ValueError("Pass on chance node?")
     elif current_player in [TurnId.MEAN_FIELD, TurnId.INVALID]:
       raise ValueError(f"Build timesteps for {current_player} is undefined.")
     else:
       # It's an individual player's turn.
-      return {current_player: converted_timesteps[current_player]}
+      converted_timesteps = {current_player: converted_timesteps[current_player]}
+
+    for player, _ in converted_timesteps.items():
+      self._had_first_timestep[player] = True
+
+    return converted_timesteps
 
   def _legal_actions_to_mask(self, player_id: types.PlayerID, legal_actions: types.Array) -> types.Array:
     """Converts a list of legal actions into a boolean mask for the action's legality."""

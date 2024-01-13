@@ -91,6 +91,48 @@ class OpenSpielProxyRPSTest(parameterized.TestCase):
     timesteps = game.step({0: 0})
     self.assertIn(1, timesteps)
 
+  def test_kuhn_poker(self):
+    """Tests step types of a non-simultaneous move game."""
+    game = openspiel_proxy.OpenSpielProxy("kuhn_poker", {"seed": 42})
+
+    timesteps = game.reset()
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[0].step_type, worlds.StepType.FIRST)
+
+    timesteps = game.step({0: 0})
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[1].step_type, worlds.StepType.FIRST)
+
+    timesteps = game.step({1: 0})
+    self.assertLen(timesteps, 2)
+    for timestep in timesteps.values():
+      self.assertEqual(timestep.step_type, worlds.StepType.LAST)
+
+  def test_leduc_poker(self):
+    """Tests step types of a non-simultaneous move game."""
+    game = openspiel_proxy.OpenSpielProxy("leduc_poker", {"seed": 42})
+
+    timesteps = game.reset()
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[0].step_type, worlds.StepType.FIRST)
+
+    timesteps = game.step({0: 1})
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[1].step_type, worlds.StepType.FIRST)
+
+    timesteps = game.step({1: 1})
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[0].step_type, worlds.StepType.MID)
+
+    timesteps = game.step({0: 1})
+    self.assertLen(timesteps, 1)
+    self.assertEqual(timesteps[1].step_type, worlds.StepType.MID)
+
+    timesteps = game.step({1: 0})
+    self.assertLen(timesteps, 2)
+    for timestep in timesteps.values():
+      self.assertEqual(timestep.step_type, worlds.StepType.LAST)
+
 
 if __name__ == "__main__":
   absltest.main()
