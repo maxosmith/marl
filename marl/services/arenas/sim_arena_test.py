@@ -62,7 +62,8 @@ class SimArenaTest(parameterized.TestCase):
         1: bots.RandomActionBot(num_actions=3),
     }
     arena = sim_arena.SimArena(openspiel_proxy.OpenSpielProxy("leduc_poker"))
-    arena.run_episode(players)
+    results = arena.run_episode(players)
+    self.assertAlmostEqual(0.0, sum(results.episode_return.values()))
 
   def test_sequential_move_return(self):
     """Test a sequential move game."""

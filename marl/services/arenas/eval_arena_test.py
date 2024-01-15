@@ -70,7 +70,8 @@ class EvalArenaTest(parameterized.TestCase):
         step_key=None,
         logger=None,
     )
-    arena.run_evaluation()
+    results = arena.run_evaluation()
+    self.assertAlmostEqual(0.0, sum(results[0].episode_return.values()))
 
   def test_sequential_move_return(self):
     """Test a sequential move game."""
