@@ -62,8 +62,13 @@ class SimArena(base_arena.BaseArena):
 
   def run_episode(self, players) -> EpisodeResult:
     """Run one episode."""
-    player_states = {}
     timesteps = self.game.reset()
+    player_states = {id: None for id in players.keys()}
+
+    has_finished = {id: False for id in players.keys()}
+    for player_id, timestep in timesteps.items():
+      if timestep.last():
+        has_finished[player_id] = True
 
     # Initialize logging statistics.
     episode_length = 0
@@ -71,11 +76,11 @@ class SimArena(base_arena.BaseArena):
     for player_id, player_ts in timesteps.items():
       episode_return[player_id] = player_ts.reward
 
-    while not np.all([ts.last() for ts in timesteps.values()]):
+    while not np.all(list(has_finished.values())):
       # Action selection.
       actions = {}
       for player_id, player_ts in timesteps.items():
-        if player_id not in player_states:
+        if player_states[player_id] is None:
           player_states[player_id] = players[player_id].episode_reset(player_ts)
         player_states[player_id], actions[player_id] = players[player_id].step(player_states[player_id], player_ts)
 
@@ -89,6 +94,8 @@ class SimArena(base_arena.BaseArena):
           episode_return[player_id] = player_ts.reward
         else:
           episode_return[player_id] = tree.map_structure(operator.iadd, episode_return[player_id], player_ts.reward)
+        if player_ts.last():
+          has_finished[player_id] = True
 
     return EpisodeResult(
         episode_length=episode_length,
