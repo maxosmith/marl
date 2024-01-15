@@ -7,7 +7,7 @@ class BaseArena(abc.ABC):
   """Interface for an agent-environment interaction (arena) services."""
 
   @abc.abstractmethod
-  def run(self, players, *, num_episodes: Optional[int] = None, num_timesteps: Optional[int] = None, **kwargs):
+  def run(self, *, num_episodes: Optional[int] = None, num_timesteps: Optional[int] = None, **kwargs):
     """Run the arena to generate experience.
 
     Runs either `num_episodes`, or _at least_ `num_timesteps`, or indefinitely.

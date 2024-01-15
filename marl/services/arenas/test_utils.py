@@ -84,9 +84,10 @@ class MockGame(worlds.Game):
 
   def action_specs(self) -> specs.PlayerIDToSpec:
     """Defines the actions that should be provided to `step` by each player."""
-    if self._action_specs is None:
-      raise RuntimeError("Action Specs were not defined for this stub.")
-    return self._action_specs
+    return {
+        0: specs.DiscreteArraySpec(num_values=3),
+        1: specs.DiscreteArraySpec(num_values=3),
+    }
 
 
 @dataclasses.dataclass
@@ -132,6 +133,83 @@ class MockAdder:
     raise NotImplementedError("Signature not defined for MockAdder.")
 
 
+class DummyAdder:
+  """Dummy adder that does nothing."""
+
+  def add(
+      self,
+      timestep: worlds.TimeStep,
+      action: types.Tree = None,
+      extras: types.Tree = (),
+  ):
+    """Record an action and the following timestep."""
+    del timestep, action, extras
+
+  def add_priority_table(self, table_name: str, priority_fn: Optional[Callable[..., Any]]):
+    """Add a priority function for sampling from a table."""
+    del table_name, priority_fn
+
+  def reset(self):
+    """Resets the adder's buffer."""
+    pass
+
+  @classmethod
+  def signature(
+      cls,
+      environment_spec: specs.EnvironmentSpec,
+      extras_spec=(),
+      sequence_length: Optional[int] = None,
+  ):
+    """This is a helper method for generating signatures for Reverb tables."""
+    del cls, environment_spec, extras_spec, sequence_length
+    raise NotImplementedError("Signature not defined for DummyAdder.")
+
+
+class MockStepTypeAdder:
+  """Mock adder that verifies complete step types."""
+
+  def __init__(self):
+    """Post initializer."""
+    self._first = False
+    self._last = False
+
+  def add(
+      self,
+      timestep: worlds.TimeStep,
+      action: types.Tree = None,
+      extras: types.Tree = (),
+  ):
+    """Record an action and the following timestep."""
+    del action, extras
+    if timestep.first():
+      self._first = True
+    elif timestep.last():
+      self._last = True
+
+  def add_priority_table(self, table_name: str, priority_fn: Optional[Callable[..., Any]]):
+    """Add a priority function for sampling from a table."""
+    del table_name, priority_fn
+
+  def reset(self):
+    """Resets the adder's buffer."""
+    pass
+
+  def verify(self):
+    """Verifies that full trajectory was logged."""
+    return self._first and self._last
+
+  @classmethod
+  def signature(
+      cls,
+      environment_spec: specs.EnvironmentSpec,
+      extras_spec=(),
+      sequence_length: Optional[int] = None,
+  ):
+    """This is a helper method for generating signatures for Reverb tables."""
+    del cls, environment_spec, extras_spec, sequence_length
+    raise NotImplementedError("Signature not defined for MockAdder.")
+
+
 @dataclasses.dataclass
 class MockLogger:
   """Mock logger that verifies logged data for tests."""
@@ -146,6 +224,19 @@ class MockLogger:
     """Writes `data` to destination (file, terminal, database, etc.)."""
     tree_utils.assert_equals(data, self.expected_logs[self._t])
     self._t += 1
+
+  def close(self):
+    """Closes the logger and underlying services."""
+    pass
+
+
+class DummyLogger:
+  """Dummy logger that does nothing."""
+
+  def write(self, data: loggers.LogData):
+    """Writes `data` to destination (file, terminal, database, etc.)."""
+    del data
+    pass
 
   def close(self):
     """Closes the logger and underlying services."""

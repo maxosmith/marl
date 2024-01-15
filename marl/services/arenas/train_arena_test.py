@@ -6,10 +6,9 @@ TODO:
 """
 from absl.testing import absltest, parameterized
 
-from marl import bots, worlds
-from marl.games import mdp
+from marl import bots
+from marl.games import openspiel_proxy
 from marl.services.arenas import test_utils, train_arena
-from marl.services.replays import noop_adder
 
 _LENGTH = "episode_length"
 _RETURN = "episode_return/player_{i}"
@@ -45,8 +44,7 @@ class TrainArenaTest(parameterized.TestCase):
     expected_adds = [
         (ts[learner_id], exp_actions[learner_id], ()) for ts, exp_actions in zip(trajectory[::2], trajectory[1::2])
     ]
-    # Current last timestep is logged with previous actions copied forward.
-    expected_adds += [(trajectory[-1][learner_id], trajectory[-2][learner_id], ())]
+    expected_adds += [(trajectory[-1][learner_id], 0, ())]  # Zero is dummy action.
 
     game = test_utils.MockGame(trajectory=timesteps, expected_actions=actions)
     players = {}
@@ -58,8 +56,34 @@ class TrainArenaTest(parameterized.TestCase):
     adder = test_utils.MockAdder(expected_adds)
     logger = test_utils.MockLogger(expected_logs)
 
-    arena = train_arena.TrainArena(game=game, adder=adder, logger=logger)
-    arena.run(learner_id=learner_id, players=players, num_episodes=1)
+    arena = train_arena.TrainArena(
+        game=game,
+        learner_id=learner_id,
+        players=players,
+        adder=adder,
+        logger=logger,
+    )
+    arena.run(num_episodes=1)
+
+  @parameterized.parameters((0,), (1,))
+  def test_full_trajectory_added(self, learner_id: int):
+    """Tests if a full trajectory is added to the replay buffer."""
+    players = {
+        0: bots.RandomActionBot(num_actions=3),
+        1: bots.RandomActionBot(num_actions=3),
+    }
+    game = openspiel_proxy.OpenSpielProxy(game="leduc_poker")
+    adder = test_utils.MockStepTypeAdder()
+
+    arena = train_arena.TrainArena(
+        game=game,
+        learner_id=learner_id,
+        players=players,
+        adder=adder,
+        logger=test_utils.DummyLogger(),
+    )
+    arena.run(num_episodes=1)
+    adder.verify()
 
 
 if __name__ == "__main__":

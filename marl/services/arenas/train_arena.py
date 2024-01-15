@@ -1,11 +1,9 @@
 """Interface for servies that simulate episodes."""
 import dataclasses
 import itertools
-import operator
 from typing import Any, Callable, NamedTuple, Optional, Sequence
 
 import numpy as np
-import tree
 from absl import logging
 
 from marl import types
@@ -45,6 +43,8 @@ class TrainArena(base_arena.BaseArena):
   """
 
   game: Any
+  learner_id: types.PlayerID
+  players: Any
   adder: Any
   logger: Optional[Any] = None
   counter: Optional[Any] = None
@@ -55,16 +55,15 @@ class TrainArena(base_arena.BaseArena):
       raise ValueError("Must specify step key with counter.")
     if self.step_key and not self.counter:
       raise ValueError("Must specify counter with step key.")
-
     self._running = False
+    self._stop = False
 
   def run(
       self,
-      learner_id: types.PlayerID,
-      players: Any,
       *,
       num_episodes: Optional[int] = None,
       num_timesteps: Optional[int] = None,
+      **kwargs,
   ) -> Sequence[EpisodeResult]:
     """Run the arena to generate experience.
 
@@ -75,25 +74,27 @@ class TrainArena(base_arena.BaseArena):
       num_timesteps: Minimum number of timesteps to run. It will let the last episode
         complete.
     """
+    del kwargs
     if self._running:
       raise RuntimeError("Tried to run an already running arena.")
     self._running = True
 
-    if (num_timesteps is None) == (num_episodes is None):
-      print(num_timesteps is None, num_episodes is None)
-      logging.info("One of `num_episodes`, `num_timesteps` must be specified.")
-    elif num_episodes is not None:
-      logging.info(f"Running for {num_episodes=}.")
+    if num_episodes is not None:
+      logging.info("Running for num_episodes=%d.", num_episodes)
+    elif num_timesteps is not None:
+      logging.info("Running for num_timesteps=%d.", num_timesteps)
     else:
-      logging.info(f"Running for {num_timesteps=}.")
+      logging.info("Running indefinitely.")
 
     def _should_stop(episodes: int, timesteps: int) -> bool:
       """Checks if the arena should stop generating experience."""
+      if (num_episodes is None) and (num_timesteps is None):
+        return False
       episodes_finished = (num_episodes is not None) and (episodes >= num_episodes)
       timesteps_finished = (num_timesteps is not None) and (timesteps >= num_timesteps)
       return episodes_finished or timesteps_finished
 
-    self._run(learner_id, players, _should_stop)
+    self._run(self.learner_id, self.players, _should_stop)
 
     self._running = False
 
@@ -101,6 +102,10 @@ class TrainArena(base_arena.BaseArena):
     """Agent-environment action loop."""
     total_timesteps = 0
     for episode_i in itertools.count():
+      if self._stop:  # Check if the services was manually stopped.
+        self._stop = False
+        break
+
       results = self._run_episode(learner_id=learner_id, players=players)
       total_timesteps += results.episode_length
 
@@ -116,40 +121,52 @@ class TrainArena(base_arena.BaseArena):
 
   def _run_episode(self, learner_id, players) -> EpisodeResult:
     timesteps = self.game.reset()
-    # Reset player's episodic state, and likely force sync their parameters.
-    player_states = {id: player.episode_reset(timesteps[id]) for id, player in players.items()}
+    player_states = {id: None for id in players.keys()}
+
+    has_finished = {id: False for id in players.keys()}
+    for player_id, timestep in timesteps.items():
+      if timestep.last():
+        has_finished[player_id] = True
 
     # Initialize logging statistics.
     episode_length = 0
-    episode_return = {id: ts.reward for id, ts in timesteps.items()}
+    episode_return = {id: 0.0 for id in players.keys()}
+    for player_id, timestep in timesteps.items():
+      episode_return[player_id] += timestep.reward
 
-    while not np.all([ts.last() for ts in timesteps.values()]):
+    while not np.all(list(has_finished.values())):
       # Action selection.
       actions = {}
-      for id, player in players.items():
-        player_states[id], actions[id] = player.step(player_states[id], timesteps[id])
-      self.adder.add(
-          timestep=timesteps[learner_id],
-          action=actions[learner_id],
-          extras=player_states[learner_id],
-      )
+      for player_id, timestep in timesteps.items():
+        if player_states[player_id] is None:
+          # Player's first timetep: episodic state, and likely force sync their parameters.
+          player_states[player_id] = players[player_id].episode_reset(timestep)
+        player_states[player_id], actions[player_id] = players[player_id].step(player_states[player_id], timestep)
+
+      # Maybe log the learner's experience.
+      if learner_id in timesteps:
+        self.adder.add(
+            timestep=timesteps[learner_id],
+            action=actions[learner_id],
+            extras=player_states[learner_id],
+        )
 
       # Transition game state.
       timesteps = self.game.step(actions)
       episode_length += 1
-      episode_return = tree.map_structure(
-          operator.iadd,
-          episode_return,
-          {id: ts.reward for id, ts in timesteps.items()},
-      )
+      for player_id, timestep in timesteps.items():
+        episode_return[player_id] += timestep.reward
+        if timestep.last():
+          has_finished[player_id] = True
 
     # Log final timestep.
-    # TODO(max): Replace dummy action/extras with zeros-like of the trees.
-    self.adder.add(
-        timestep=timesteps[learner_id],
-        action=actions[learner_id],
-        extras=player_states[learner_id],
-    )
+    if learner_id in timesteps:
+      # TODO(max): Replace dummy action/extras with zeros-like of the trees.
+      self.adder.add(
+          timestep=timesteps[learner_id],
+          action=self.game.action_specs()[learner_id].generate_value(),
+          extras=player_states[learner_id],
+      )
 
     return EpisodeResult(
         episode_length=episode_length,
@@ -160,3 +177,4 @@ class TrainArena(base_arena.BaseArena):
     """Stop running this service if set to run indefinitely."""
     if not self._running:
       raise RuntimeError("Tried to stop an arena that isn't running.")
+    self._stop = True
