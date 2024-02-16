@@ -3,7 +3,6 @@ from typing import Union
 
 import numpy as np
 import pyspiel
-from absl import logging
 from open_spiel.python import rl_environment
 from pyspiel import PlayerId as TurnId
 
@@ -38,14 +37,11 @@ class OpenSpielProxy(worlds.Game):
         **kwargs: Additional settings passed to the OpenSpiel game.
     """
     if isinstance(game, pyspiel.Game):
-      logging.info("Proxy built using game instance: %s", game.get_type().short_name)
       self._game = game
     elif kwargs:
       game_settings = {key: pyspiel.GameParameter(val) for (key, val) in kwargs.items()}
-      logging.info("Proxy built using game settings: %s", game_settings)
       self._game = pyspiel.load_game(game, game_settings)
     else:
-      logging.info("Proxy built using game string: %s", game)
       self._game = pyspiel.load_game(game)
     self._game = rl_environment.Environment(self._game, include_full_state=include_full_state)
 
@@ -132,8 +128,13 @@ class OpenSpielProxy(worlds.Game):
     step_type = worlds.StepType(timesteps.step_type.value)
     converted_timesteps = {}
     for player in range(self._num_players):
+      player_step_type = step_type if self._had_first_timestep[player] else worlds.StepType.FIRST
+      if step_type == worlds.StepType.LAST:
+        # Episode completed without this player ever acting.
+        player_step_type = step_type
+
       converted_timesteps[player] = worlds.TimeStep(
-          step_type=step_type if self._had_first_timestep[player] else worlds.StepType.FIRST,
+          step_type=player_step_type,
           reward=rewards[player],
           observation=observations[player],
       )
