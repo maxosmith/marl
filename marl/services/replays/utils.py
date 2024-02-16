@@ -11,15 +11,23 @@ from marl.utils import array_utils, tree_utils
 
 def padding_mask(step: worlds.Trajectory) -> types.Array:
   """Construct a binary mask with 0s for padded steps."""
-  # This puts 1s on the last step and all padding.
-  mask = jnp.cumsum(step.end_of_episode, axis=-1)
+  # Get the shape of the end_of_episode array
+  shape = step.end_of_episode.shape
+  # Create an initial False value for each sequence in the batch
+  initial_values = jnp.zeros(shape[:-1], dtype=bool)
+  # Reshape initial_values to be broadcastable with end_of_episode
+  initial_values = jnp.expand_dims(initial_values, axis=-1)
+  # Shift the end_of_episode flags one step forward along the time axis
+  # Concatenate the initial false values at the start of each sequence
+  shifted_end_of_episode = jnp.concatenate([initial_values, step.end_of_episode[..., :-1]], axis=-1)
+  # Perform a cumulative sum along the time axis
+  mask = jnp.cumsum(shifted_end_of_episode, axis=-1)
+  # Invert the mask: valid steps (including end of episode) are 1s, padded steps are 0s
   mask = jnp.logical_not(mask)
   return mask
 
 
-def final_step_like(
-    step: worlds.Trajectory, next_observation: types.Tree
-) -> worlds.Trajectory:
+def final_step_like(step: worlds.Trajectory, next_observation: types.Tree) -> worlds.Trajectory:
   """Return a list of steps with the final step zero-filled."""
   # Make zero-filled components so we can fill out the last step.
   zero_action, zero_reward, zero_discount, zero_extras = tree.map_structure(
@@ -66,11 +74,8 @@ def calculate_priorities(
     given collection of steps.
   """
 
-  if any([priority_fn is not None for priority_fn in priority_fns.values()]):
+  if any(priority_fn is not None for priority_fn in priority_fns.values()):
     # Stack the steps and wrap them as PrioityFnInput.
     fn_input = priority.PriorityFnInput(*tree_utils.stack(steps))
 
-  return {
-      table: (priority_fn(fn_input) if priority_fn else 1.0)
-      for table, priority_fn in priority_fns.items()
-  }
+  return {table: (priority_fn(fn_input) if priority_fn else 1.0) for table, priority_fn in priority_fns.items()}
