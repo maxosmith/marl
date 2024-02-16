@@ -42,14 +42,14 @@ class SnapshotBot(individuals.Bot):
     self._policy_apply = None
 
     self._backend = backend
-    self._device = jax.local_devices(backend=self._backend)
-    if len(self._device) > 1:
-      warnings.warn(f"Found {len(self._device)} devices, but only using {self._device[0]}")
-    self._device = self._device[0]
+    self._device = None
 
   def step(self, state: types.State, timestep: worlds.TimeStep) -> Tuple[types.Action, types.State]:
     """Forward policy pass."""
-    action, new_state = self._policy_apply(self.params, timestep, state)
+    if isinstance(timestep.observation, dict) and ("serialized_state" in timestep.observation):
+      del timestep.observation["serialized_state"]
+    self._rng_key, subkey = jax.random.split(self._rng_key)
+    action, new_state = self._policy_apply(self.params, state, timestep, subkey)
     action = tree_utils.to_numpy(action)
     if timestep.last():
       self._maybe_unload_snapshot()
@@ -59,9 +59,14 @@ class SnapshotBot(individuals.Bot):
     """Initialize recurrent state."""
     if not timestep.first():
       raise ValueError("Reset must be called after the first timestep.")
+    self._device = jax.local_devices(backend=self._backend)
+    if len(self._device) > 1:
+      warnings.warn(f"Found {len(self._device)} devices, but only using {self._device[0]}")
+    self._device = self._device[0]
+
     self._maybe_load_snapshot()
     self._rng_key, subkey = jax.random.split(self._rng_key)
-    state = self._policy.initialize_carry(rng=subkey, input_shape=())
+    state = self._policy.apply({}, subkey, (), method=self._policy.initialize_carry)
     state = jax.device_put(state, device=self._device)
     return state
 
