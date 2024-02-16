@@ -31,7 +31,7 @@ class TensorboardLogger(base_logger.BaseLogger):
 
   def write(self, data: base_logger.LogData):
     """Write a batch of data."""
-    step = data[self._step_key] if self._step_key is not None else self._num_calls
+    step = data.get(self._step_key, self._num_calls) if self._step_key is not None else self._num_calls
     with self._summary_writer.as_default():
       for key, value in data.items():
         num_dims = len(np.asarray(value).shape)
