@@ -1,6 +1,5 @@
 """A learning agent's policy."""
 import warnings
-from typing import Optional
 
 import flax.linen as nn
 import jax
@@ -70,7 +69,7 @@ class LearnerPolicy(individuals.Agent):
     self._device = self._device[0]
     self._policy_apply = jax.jit(self._policy.apply, device=self._device)
 
-  def step(self, state: Optional[types.State], timestep: worlds.TimeStep):
+  def step(self, state: types.StateAndExtra, timestep: worlds.TimeStep):
     """Policy step."""
     if self._timestep_update_freq:
       self._num_timesteps += 1
@@ -79,9 +78,13 @@ class LearnerPolicy(individuals.Agent):
         logging.debug("Updating policy parameters due to step count.")
         self.update()
 
-    action, new_state = self._policy_apply(self.params, timestep, state)
+    if isinstance(timestep.observation, dict) and ("serialized_state" in timestep.observation):
+      del timestep.observation["serialized_state"]
+
+    self._rng_key, subkey = jax.random.split(self._rng_key)
+    new_state, action = self._policy_apply(self.params, state.state, timestep, subkey)
     action = tree_utils.to_numpy(action)
-    return action, new_state
+    return types.StateAndExtra(state=new_state, extra={"version": self.params_version}), action
 
   def episode_reset(self, timestep: worlds.TimeStep):
     """Reset the agent's state for a new episode."""
@@ -96,9 +99,9 @@ class LearnerPolicy(individuals.Agent):
         self.update()
 
     self._rng_key, subkey = jax.random.split(self._rng_key)
-    state = self._policy.initialize_carry(rng=subkey, batch_shape=())
+    state = self._policy.apply({}, subkey, (), method=self._policy.initialize_carry)
     state = jax.device_put(state, device=self._device)
-    return state
+    return types.StateAndExtra(state=state, extra={"version": self.params_version})
 
   def update(self):
     """Force the learner to synchronize its parameters with its variable source."""
@@ -108,4 +111,9 @@ class LearnerPolicy(individuals.Agent):
   @property
   def params(self) -> types.Params:
     """Policy parameters."""
-    return self._variable_client.params
+    return self._variable_client.params[0]
+
+  @property
+  def params_version(self) -> types.Array:
+    """Policy parameter version number."""
+    return self._variable_client.params[1]

@@ -28,9 +28,10 @@ class _TestPolicy(nn.Module):
   """
 
   @nn.module.nowrap
-  def step(self, timestep: worlds.TimeStep, state: types.State):
+  def step(self, state: types.State, timestep: worlds.TimeStep, rng_key):
     """Forward policy pass."""
-    self.__call__(timestep, state)
+    del rng_key
+    self(timestep, state, None)
 
   @nn.module.nowrap
   def initialize_carry(self, rng: jax.random.PRNGKey, batch_shape: Tuple[int, ...]):
@@ -38,15 +39,16 @@ class _TestPolicy(nn.Module):
     return jnp.ones(batch_shape[:-1], dtype=int)
 
   @nn.compact
-  def __call__(self, timestep: worlds.TimeStep, state: types.State):
+  def __call__(self, state: types.State, timestep: worlds.TimeStep, rng_key):
     """Forward policy pass."""
+    del rng_key
     observation = jnp.asarray(timestep.observation)
     mean = self.param(
         "mean",
         lambda _, shape: jnp.zeros(shape, dtype=int),  # rng, first param, is unused.
         observation.shape,
     )
-    return (observation * mean) + state, state + 1
+    return state + 1, (observation * mean) + state
 
 
 _POLICY = _TestPolicy()
@@ -83,7 +85,7 @@ class LearnPolicyTest(parameterized.TestCase):
 
     state = agent.episode_reset(_FAKE_TIMESTEP)
     for timestep_i in range(9):
-      action, state = agent.step(_FAKE_TIMESTEP, state)
+      state, action = agent.step(state, _FAKE_TIMESTEP)
       tree_utils.assert_equals(
           action,
           expected_actions[timestep_i],
@@ -143,7 +145,7 @@ class LearnPolicyTest(parameterized.TestCase):
           expected_variables[timestep_i // timestep_update_freq],
       )
 
-      _, state = agent.step(_FAKE_TIMESTEP, state)
+      state, _ = agent.step(state, _FAKE_TIMESTEP)
       if include_resets:
         state = agent.episode_reset(_FAKE_TIMESTEP)
 
@@ -202,7 +204,7 @@ class LearnPolicyTest(parameterized.TestCase):
 
       state = agent.episode_reset(_FAKE_TIMESTEP)
       if include_steps:
-        _, state = agent.step(_FAKE_TIMESTEP, state)
+        state, _ = agent.step(state, _FAKE_TIMESTEP)
 
 
 if __name__ == "__main__":

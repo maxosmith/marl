@@ -35,7 +35,7 @@ class StubVariableClient(variable_client.VariableClient):
   @property
   def params(self) -> Union[types.Params, List[types.Params]]:
     """Returns the first params for one key, otherwise the whole params list."""
-    return self.returned_variables[self._t]
+    return (self.returned_variables[self._t], self._t)
 
 
 @dataclasses.dataclass
