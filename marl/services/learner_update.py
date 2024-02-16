@@ -3,7 +3,6 @@ import functools
 import itertools
 from typing import Iterator, NamedTuple, Optional, Sequence
 
-import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -24,6 +23,7 @@ class TrainingState(NamedTuple):
   params: types.Params
   opt_state: optax.OptState
   rng_key: jax.random.PRNGKeyArray
+  version: types.Array
 
 
 class LearnerUpdate:
@@ -90,9 +90,10 @@ class LearnerUpdate:
         rng: jax.random.PRNGKey,
         opt_state: optax.OptState,
         sample: reverb.ReplaySample,
+        version,
     ):
       """Computes and applies an update step on the learner's parameters."""
-      rng_key, subkey = jax.random.split(rng)
+      rng_key, _ = jax.random.split(rng)
 
       # Compute gradients.
       grad_fn = jax.value_and_grad(
@@ -112,7 +113,7 @@ class LearnerUpdate:
           "param_norm": optax.global_norm(new_params),
           "param_updates_norm": optax.global_norm(updates),
       })
-      new_state = TrainingState(params=new_params, opt_state=new_opt_state, rng_key=rng_key)
+      new_state = TrainingState(params=new_params, opt_state=new_opt_state, rng_key=rng_key, version=version + 1)
       return new_state, metrics
 
     self._update_step = jax.pmap(_update_step, axis_name=LearnerUpdate._PMAP_AXIS_NAME, devices=self._devices)
@@ -139,16 +140,20 @@ class LearnerUpdate:
     sample = next(data_iter) if data_iter else next(self._data_iterator)
     if isinstance(sample, reverb.ReplaySample):
       sample_data = sample.data
+      extras = sample_data.extras.extra
+      sample_data = sample_data._replace(extras=sample_data.extras.state)
     else:
       sample_data = sample
     self._stopwatch.stop("fetch")
 
     self._stopwatch.start("update")
+
     self._state, metrics = self._update_step(
         params=self._state.params,
         rng=self._state.rng_key,
         opt_state=self._state.opt_state,
         sample=sample_data,
+        version=self._state.version,
     )
     self._stopwatch.stop("update")
 
@@ -161,6 +166,19 @@ class LearnerUpdate:
     times = self._stopwatch.get_splits(aggregate_fn=np.mean)
     for key, value in times.items():
       metrics[f"times/{key}"] = value
+
+    if isinstance(sample, reverb.ReplaySample):
+      # Reverb metadata.
+      metrics["replay/times_sampled"] = jnp.mean(sample.info.times_sampled)
+      metrics["replay/priority"] = jnp.mean(sample.info.priority)
+      metrics["replay/probability"] = jnp.mean(sample.info.probability)
+      metrics["replay/table_size"] = jnp.mean(sample.info.table_size)
+
+      # Behavioral vs Target parameter versions.
+      metrics["off_policy/behavioral_version"] = jnp.mean(extras["version"])
+      # We update the target policy's version in _update_step, so -1.
+      metrics["off_policy/target_version"] = jnp.mean(self._state.version - 1)
+      metrics["off_policy/delta"] = jnp.mean(self._state.version - extras["version"] - 1)
 
     if self._counter:
       counts = self._counter.increment(
@@ -181,10 +199,12 @@ class LearnerUpdate:
     if names is not None:
       raise NotImplementedError("Getting specific variable collections not supported.")
     del names
-    return distributed_utils.get_from_first_device(
-        [self._state.params],
+    params, version = distributed_utils.get_from_first_device(
+        [self._state.params, self._state.version],
         as_numpy=False,
-    )[0]
+    )
+    version = jnp.reshape(version, ())
+    return (params, version)
 
   def save(self) -> TrainingState:
     """Retrieve the learner state to be saved."""
@@ -196,14 +216,14 @@ class LearnerUpdate:
 
   def reset_training_state(self):
     """Reset the learner's parameters and optimizer state."""
-    self._random_key, subkey = jax.random.split(self._random_key)
+    self._random_key, subkey1, subkey2, subkey3 = jax.random.split(self._random_key, 4)
     dummy_timestep = worlds.TimeStep(
         step_type=None,
         observation=spec_utils.zeros_like(self._env_spec.observation),
         reward=spec_utils.zeros_like(self._env_spec.reward),
     )
-    dummy_agent_state = self._policy.initialize_carry(subkey, ())
-    params = self._policy.init(subkey, dummy_agent_state, dummy_timestep)
+    dummy_agent_state = self._policy.apply({}, subkey1, (), method=self._policy.initialize_carry)
+    params = self._policy.init(subkey2, dummy_agent_state, dummy_timestep, subkey3)
     opt_state = self._optimizer.init(params)
-    self._state = TrainingState(params=params, opt_state=opt_state, rng_key=self._random_key)
+    self._state = TrainingState(params=params, opt_state=opt_state, rng_key=self._random_key, version=jnp.array(0))
     self._state = distributed_utils.replicate_on_all_devices(self._state, self._local_devices)

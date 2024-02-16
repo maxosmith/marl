@@ -11,6 +11,7 @@ from typing import Mapping, Sequence, Tuple
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import tree
 from absl.testing import absltest, parameterized
@@ -42,9 +43,11 @@ class _LinearRegression(nn.Module):
 
 
 class _RegressionLoss(nn.Module):
+  """Regression loss module."""
 
   @nn.compact
   def __call__(self, data: worlds.Trajectory, predictions: types.Tree):
+    """Compute L2 distance for regression."""
     true_actions = data.action
     losses = (predictions - true_actions) ** 2
     return jnp.mean(losses), dict(losses=losses)
@@ -58,17 +61,21 @@ class _Learner(nn.Module):
   """
 
   def setup(self):
+    """Setup submodules and params."""
     self._lin_reg = _LinearRegression()
     self._loss_fn = _RegressionLoss()
 
   def step(self, state, timestep):
     """Forward policy pass."""
-    return self.__call__(state, timestep)
+    return self(state, timestep, None)
 
-  def __call__(self, state, timestep):
+  def __call__(self, state, timestep, rng_key: jax.random.KeyArray):
+    """Forward policy pass."""
+    del rng_key
     return self._lin_reg(state, timestep)
 
   def initialize_carry(self, rng: jax.random.PRNGKey, batch_shape: Tuple[int, ...]):
+    """Initialize Learner's recursive state."""
     del rng
     return jnp.ones(batch_shape[:-1], dtype=int)
 
@@ -76,11 +83,12 @@ class _Learner(nn.Module):
       self,
       data: worlds.Trajectory,
   ) -> Tuple[types.Tree, Mapping[str, types.Tree]]:
-    """."""
+    """Compute the learner's loss."""
     initial_state = tree.map_structure(lambda s: s[:, 0], data.extras)
 
     # Define a new function to pass to jax.lax.scan
     def scan_fn(carry, timestep):
+      """Scan over the data's time axis."""
       new_carry, predictions = self._lin_reg(carry, timestep)
       return new_carry, predictions
 
@@ -93,12 +101,11 @@ class _Learner(nn.Module):
 
 _LEARNER = _Learner()
 _LEARNER_INIT_PARAMS = dict(
-    params=dict(
-        _lin_reg=dict(
-            mean=jnp.asarray(1, dtype=float), bias=jnp.asarray(1, dtype=float)
-        )
-    )
+    params=dict(_lin_reg=dict(mean=jnp.asarray(1, dtype=float), bias=jnp.asarray(1, dtype=float)))
 )
+
+
+prev_xla_flags = None
 
 
 def setUpModule():
@@ -184,18 +191,23 @@ class LearnerUpdateTest(parameterized.TestCase):
             reward=specs.ArraySpec(shape=(), dtype=float, name="reward"),
         ),
         random_key=jax.random.PRNGKey(42),
-        data_iterator=distributed_utils.multi_device_put(
-            iter(data), jax.local_devices()
-        ),
+        data_iterator=distributed_utils.multi_device_put(iter(data), jax.local_devices()),
     )
-    tree_utils.assert_equals(updater.get_variables(), _LEARNER_INIT_PARAMS)
 
-    for params in expected_params:
+    params, version = updater.get_variables()
+    tree_utils.assert_equals(params, _LEARNER_INIT_PARAMS)
+    np.testing.assert_array_equal(version, 0)
+
+    for param_i, expected in enumerate(expected_params):
       updater.step()
-      tree_utils.assert_equals(updater.get_variables(), params)
+      params, version = updater.get_variables()
+      tree_utils.assert_equals(params, expected)
+      np.testing.assert_array_equal(version, 1 + param_i)
 
     updater.reset_training_state()
-    tree_utils.assert_equals(updater.get_variables(), _LEARNER_INIT_PARAMS)
+    params, version = updater.get_variables()
+    tree_utils.assert_equals(params, _LEARNER_INIT_PARAMS)
+    np.testing.assert_array_equal(version, 0)
 
 
 if __name__ == "__main__":
