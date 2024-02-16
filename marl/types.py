@@ -5,7 +5,7 @@ types that require importing structures from within this package.
 The package API (`__init__`) should import all of these types and
 newly defined types into a single interface.
 """
-from typing import Any, Mapping, NamedTuple
+from typing import Mapping, NamedTuple
 
 import chex
 
@@ -36,3 +36,10 @@ class Transition(NamedTuple):
   reward: Tree
   next_observation: Tree
   extras: Tree = ()
+
+
+class StateAndExtra(NamedTuple):
+  """Recurrent state and extra."""
+
+  state: State
+  extra: Tree
