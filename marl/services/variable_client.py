@@ -29,8 +29,10 @@ class ReferenceVariableSource(interfaces.VariableSource):
   actor to the inference server.
   """
 
-  def get_variables(self, names: Sequence[str]) -> List[VariableReference]:
+  def get_variables(self, names: None | Sequence[str] = None) -> List[types.Tree]:
     """Get referneces for all variables."""
+    if names is None:
+      raise RuntimeError("Must specify reference variable names.")
     return [VariableReference(name) for name in names]
 
 
@@ -57,7 +59,7 @@ class VariableClient:
         device: The name of a JAX device to put variables on. If None (default),
             VariableClient won't put params on any device.
     """
-    logging.info(f"Initializing a VariableClient with source: {source}.")
+    logging.info("Initializing a VariableClient with source: %s", source)
     self._update_period = update_period
     self._call_counter = 0
     self._last_call = time.time()
@@ -143,7 +145,7 @@ class VariableClient:
     if self._params is None:
       self.update_and_wait()
 
-    if len(self._params) == 1:
+    if isinstance(self._params, list) and len(self._params) == 1:
       return self._params[0]
     else:
       return self._params
