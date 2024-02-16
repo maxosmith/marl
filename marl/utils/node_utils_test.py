@@ -1,10 +1,8 @@
 """Test for `node_utils`."""
-import tensorflow as tf  # isort: skip
 import dataclasses
 import threading
 import time
 
-import courier
 import launchpad as lp
 from absl.testing import absltest, parameterized
 from launchpad.launch.test_multi_threading import address_builder
@@ -43,7 +41,9 @@ class BuildCourierNodeTest(parameterized.TestCase):
       return _FakeService(x=42, y=3.14)
 
     service: lp.CourierNode = _build_service()
+    # pylint: disable=protected-access
     self.assertEqual(service._should_run, not disable_run)
+    # pylint: enable=protected-access
 
   @parameterized.parameters(
       dict(x=42, y=3.14, z="not_default"),
