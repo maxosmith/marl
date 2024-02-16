@@ -8,7 +8,7 @@ import collections
 import dataclasses
 import threading
 import time
-from typing import Any, Mapping, Optional, Union
+from typing import Mapping, Optional, Union
 
 import numpy as np
 
@@ -88,7 +88,7 @@ class Counter:
       with self._lock:
         counts = dict_utils.prefix_keys(self._counts, self._prefix)
         # Reset the local counts, as they will be merged into the parent and the cache.
-        self._counts = {}
+        self._counts = collections.defaultdict(int)
       self._cache = self._parent.increment(**counts)
       self._last_sync_time = now_secs
 
